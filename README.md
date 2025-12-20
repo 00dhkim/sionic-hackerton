@@ -44,9 +44,8 @@ sinoic-hackerton/
 
 ### 1. 환경 설정
 *   **필수 요구사항**: Python 3.12+, Neo4j DB (Docker 추천), OpenAI API Key.
-*   **의존성 설치**:
+*   **의존성 설치** (프로젝트 루트에서 실행):
     ```bash
-    cd graph_db
     uv sync
     ```
 *   **.env 파일 작성** (프로젝트 루트 디렉토리에 생성):
@@ -57,26 +56,23 @@ sinoic-hackerton/
     NEO4J_PASSWORD=testpassword
     ```
 
-### 2. 데이터베이스 구축 (프로젝트 루트에서 실행 권장)
+### 2. 데이터베이스 구축 (프로젝트 루트에서 실행)
 최초 1회 실행하여 그래프를 생성하고 벡터 인덱스를 빌드합니다.
 ```bash
-cd graph_db
-
 # 1. 공문서 기초 데이터(제목, 인용 관계) 구축
-uv run 301_build_real_graph.py
+uv run graph_db/301_build_real_graph.py
 
 # 2. 공문서 본문(MD 파일) 업데이트 및 벡터 인덱스 생성
-uv run 303_update_doc_content.py
+uv run graph_db/303_update_doc_content.py
 
 # 3. 민원 데이터 추가 및 공문서-민원 유사도 연결 (Top 5)
-uv run 302_add_complaints_node.py
+uv run graph_db/302_add_complaints_node.py
 ```
 
 ### 3. API 서버 및 웹 UI 실행
 ```bash
 # 서버 실행 (기본 포트 8000)
-cd graph_db
-uv run uvicorn api_server_real:app --host 0.0.0.0 --port 8000 --reload
+uv run uvicorn graph_db.api_server_real:app --host 0.0.0.0 --port 8000 --reload
 ```
 서버 실행 후 브라우저에서 `http://localhost:8000/`으로 접속하면 **통합 검색 및 그래프 시각화 대시보드**를 사용할 수 있습니다.
 

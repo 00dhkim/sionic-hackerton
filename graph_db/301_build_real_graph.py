@@ -11,8 +11,8 @@ def build_graph():
     print("--- 1. Loading Data ---")
     # Load CSVs
     try:
-        df_docs = pd.read_csv("../data/seoul_youth_allowance_others_with_docnum.csv")
-        df_cites = pd.read_csv("../data/citation_relations.csv")
+        df_docs = pd.read_csv("data/seoul_youth_allowance_others_with_docnum.csv")
+        df_cites = pd.read_csv("data/citation_relations.csv")
         print(f" > Documents: {len(df_docs)} rows")
         print(f" > Citations: {len(df_cites)} rows")
     except Exception as e:
