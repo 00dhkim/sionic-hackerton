@@ -1,5 +1,6 @@
 # 서울시 청년정책 공문서-민원 통합 GraphRAG 시스템
 
+> 1st Place Winner of Instruct.KR x Sionic 2025 Hackathon<br>
 > 발표자료: [https://docs.google.com/presentation/d/14w9O2muEAtX1wCSyr8blcgLKZR_diBEYmZjQwv0opMI/edit?usp=sharing](https://docs.google.com/presentation/d/14w9O2muEAtX1wCSyr8blcgLKZR_diBEYmZjQwv0opMI/edit?usp=sharing)
 
 이 프로젝트는 **서울시 청년수당 공문서**와 **민원 답변 데이터**를 결합하여, 민원 사례로부터 정책적 근거(공문서)와 담당자를 추적할 수 있는 **고도화된 Graph Retrieval-Augmented Generation (GraphRAG)** 시스템입니다.
