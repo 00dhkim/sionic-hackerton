@@ -5,115 +5,96 @@ import glob
 
 # Configuration
 ATTACHMENT_DIR = 'attachments'
+INPUT_CSV = 'seoul_youth_allowance_others_with_docnum.csv'
 OUTPUT_CSV = 'citation_relations.csv'
 
-# Regex patterns
-# Pattern to find the document number. 
-# Matches: Hangul words (possibly with spaces) + Hyphen + Digits
-# Example: 청년사업담당관-11290
+# Regex pattern for document numbers: Hangul + Hyphen + Digits
+# e.g., 청년사업담당관-11290
 DOC_NUM_PATTERN = re.compile(r'([가-힣]+(?:[ ][가-힣]+)*-\d+)')
 
-def get_file_index(filename):
-    """Extracts the numeric index from the filename (e.g., '12_parsed.md' -> '12')"""
-    match = re.search(r'^(\d+)_', filename)
+def clean_doc_num(text):
+    """
+    Cleans up the extracted document number string.
+    Removes common prefixes like "문서 번호는 ", "접수 ", etc.
+    """
+    if not text: return None
+    # Extract the core pattern
+    match = DOC_NUM_PATTERN.search(text)
     if match:
-        return match.group(1)
+        return match.group(1).strip()
     return None
 
-def extract_own_doc_number(content):
-    """
-    Attempts to find the document's own number.
-    Usually appears near '문서번호' at the beginning of the file.
-    """
-    # Look for the pattern specifically after "문서번호"
-    # This regex looks for "문서번호" followed by loose matching until the pattern
-    match = re.search(r'문서번호\s*[:|]?\s*([가-힣]+(?:[ ][가-힣]+)*-\d+)', content[:1000]) # Scan first 1000 chars
-    if match:
-        return match.group(1)
+def main():
+    print("Step 1: Loading Document Map from CSV...")
+    doc_map = {} # { "청년사업담당관-1234": "12" } 
     
-    # Fallback: Find the first occurrence of the pattern in the first 500 chars 
-    # (assuming the header contains it)
-    match = DOC_NUM_PATTERN.search(content[:500])
-    if match:
-        return match.group(1)
+    with open(INPUT_CSV, 'r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            idx = row['Index']
+            raw_doc_num = row.get('Doc_Number', '')
+            
+            clean_num = clean_doc_num(raw_doc_num)
+            if clean_num:
+                doc_map[clean_num] = idx
+            # else:
+            #     print(f"Skipping index {idx}: Invalid doc num '{raw_doc_num}'")
+
+    print(f"Mapped {len(doc_map)} documents from CSV.")
+
+    print("Step 2: Finding Citations in Parsed Files...")
+    relations = []
     
-    return None
-
-def extract_relations():
-    doc_map = {} # Mapping: DocNumber -> FileIndex
-    file_contents = {} # Cache content to avoid re-reading: FileIndex -> Content
-
-    print("Phase 1: Indexing Document Numbers...")
     files = glob.glob(os.path.join(ATTACHMENT_DIR, '*_parsed.md'))
     
     for file_path in files:
         filename = os.path.basename(file_path)
-        idx = get_file_index(filename)
-        if not idx:
-            continue
+        # Extract source index from filename (e.g. "12_parsed.md" -> "12")
+        match = re.search(r'^(\d+)_', filename)
+        if not match: continue
+        source_idx = match.group(1)
 
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-                file_contents[idx] = content
                 
-                doc_num = extract_own_doc_number(content)
-                if doc_num:
-                    # Normalize: Remove spaces in the key for better matching (optional, but safer)
-                    # Actually, let's keep it exact first, but maybe strip whitespace
-                    clean_doc_num = doc_num.strip()
-                    doc_map[clean_doc_num] = idx
-                    # print(f"  [{idx}] Identified as {clean_doc_num}")
+                # Check for each known document number in this file's content
+                for target_doc_num, target_idx in doc_map.items():
+                    if source_idx == target_idx:
+                        continue # Skip self-reference
+
+                    # Use regex with negative lookahead to avoid partial matches
+                    # e.g. "Doc-67" should not match "Doc-6798"
+                    # Ensure the char after the number is NOT a digit or hyphen
+                    # We also escape the doc num just in case
+                    pattern = re.compile(re.escape(target_doc_num) + r'(?!\d|-)')
+                    
+                    match = pattern.search(content)
+                    if match:
+                        # Find context
+                        start = max(0, match.start() - 50)
+                        end = min(len(content), match.end() + 50)
+                        context = content[start:end].replace('\n', ' ').strip()
+                        
+                        relations.append({
+                            'Source_Index': source_idx,
+                            'Target_Index': target_idx,
+                            'Cited_Doc_Num': target_doc_num,
+                            'Citation_Text': f"...{context}..."
+                        })
+ 
         except Exception as e:
             print(f"Error reading {filename}: {e}")
 
-    print(f"Total documents with identified numbers: {len(doc_map)}")
+    print(f"Found {len(relations)} relations.")
 
-    print("Phase 2: Finding Citations...")
-    relations = []
-
-    for source_idx, content in file_contents.items():
-        # Find all document number patterns in the text
-        # We iterate through all unique matches
-        for match in set(DOC_NUM_PATTERN.findall(content)):
-            cited_doc_num = match.strip()
-            
-            # Check if this cited number exists in our map
-            if cited_doc_num in doc_map:
-                target_idx = doc_map[cited_doc_num]
-                
-                # 1. Self-reference check: Don't record if finding its own number
-                if source_idx == target_idx:
-                    continue
-                
-                # 2. Extract Context (Citation Text)
-                # Find the location of the match to extract context
-                # We simply find the first occurrence for the snippet
-                text_match = re.search(re.escape(cited_doc_num), content)
-                context_snippet = ""
-                if text_match:
-                    start = max(0, text_match.start() - 50)
-                    end = min(len(content), text_match.end() + 50)
-                    context_snippet = content[start:end].replace('\n', ' ').strip()
-                    # Add ellipsis
-                    context_snippet = f"...{context_snippet}..."
-
-                relations.append({
-                    'Source_Doc_Index': source_idx,
-                    'Target_Doc_Index': target_idx,
-                    'Target_Doc_Number': cited_doc_num,
-                    'Citation_Text': context_snippet
-                })
-
-    print(f"Total relations found: {len(relations)}")
-
-    # Write to CSV
+    print("Step 3: Saving to CSV...")
     with open(OUTPUT_CSV, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=['Source_Doc_Index', 'Target_Doc_Index', 'Target_Doc_Number', 'Citation_Text'])
+        writer = csv.DictWriter(f, fieldnames=['Source_Index', 'Target_Index', 'Cited_Doc_Num', 'Citation_Text'])
         writer.writeheader()
         writer.writerows(relations)
     
-    print(f"Relations saved to {OUTPUT_CSV}")
+    print(f"Saved to {OUTPUT_CSV}")
 
 if __name__ == "__main__":
-    extract_relations()
+    main()
