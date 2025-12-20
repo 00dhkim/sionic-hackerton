@@ -1,6 +1,6 @@
 import os
 import contextlib
-from typing import List, Optional
+from typing import List, Optional, Union
 from dotenv import load_dotenv
 
 load_dotenv() 
@@ -20,203 +20,123 @@ NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "testpassword")
 # --- Global State ---
 class AppState:
     graph: Optional[Neo4jGraph] = None
-    vector_index: Optional[Neo4jVector] = None
+    doc_vector: Optional[Neo4jVector] = None
+    complaint_vector: Optional[Neo4jVector] = None
 
 state = AppState()
 
-# --- Graph Logic (2-Hop Expansion) ---
-def get_expanded_context(doc_title: str) -> str:
+# --- Graph Logic ---
+def get_trace_context(node_id: Union[int, str], label: str) -> str:
     """
-    Traverse the graph up to 2 hops to find Author, Department, and Cited Documents.
+    Traverse the graph based on the starting node type.
     """
-    if not state.graph:
-        return ""
-        
-    # Optimized Query:
-    # 1. Author & Department (1-hop & 2-hop)
-    # 2. Other documents by the same author (2-hop) - As per user's logic
-    # 3. Cited documents (1-hop) - As per user's logic
-    query = """
-    MATCH (d:Document {doc_id: $doc_id})
+    if not state.graph: return ""
     
-    // 1. Author & Department
-    OPTIONAL MATCH (d)<-[:AUTHORED]-(author:Person)
-    OPTIONAL MATCH (author)-[:BELONGS_TO]->(dept:Department)
+    if label == "Complaint":
+        # Complaint -> Related Docs -> Authors
+        query = """
+        MATCH (c:Complaint {index: $id})
+        OPTIONAL MATCH (c)-[r:RELATED_TO]->(d:Document)
+        OPTIONAL MATCH (d)<-[:AUTHORED]-(p:Person)
+        RETURN 
+            d.title as doc_title,
+            d.doc_id as doc_id,
+            p.name as author_name,
+            r.score as sim_score
+        ORDER BY sim_score DESC LIMIT 5
+        """
+        result = state.graph.query(query, params={"id": node_id})
+        context = "  [Related Public Documents & Authors]\n"
+        for row in result:
+            if row['doc_title']:
+                context += f"  - {row['doc_title']} (ID: {row['doc_id']}) / 담당자: {row['author_name']}\n"
+        return context
+
+    elif label == "Document":
+        # Document -> Author -> Other Docs & Citations
+        query = """
+        MATCH (d:Document {doc_id: $id})
+        OPTIONAL MATCH (d)<-[:AUTHORED]-(p:Person)-[:BELONGS_TO]->(dep:Department)
+        OPTIONAL MATCH (d)-[:CITES]->(cited:Document)
+        RETURN 
+            p.name as author, dep.name as dept,
+            collect(DISTINCT cited.title) as citations
+        """
+        result = state.graph.query(query, params={"id": node_id})
+        if not result: return ""
+        row = result[0]
+        context = f"  [Metadata]\n  - Author: {row['author']} ({row['dept']})\n"
+        if row['citations']:
+            context += f"  - Citations: {', '.join(row['citations'][:3])}\n"
+        return context
     
-    // 2. Same Author's other documents (2-hop)
-    OPTIONAL MATCH (author)-[:AUTHORED]->(other_doc:Document)
-    WHERE other_doc <> d
-    
-    // 3. Outgoing Citations (This doc cites others)
-    OPTIONAL MATCH (d)-[:CITES]->(cited_doc:Document)
-    
-    // 4. Incoming Citations (Others cite this doc)
-    OPTIONAL MATCH (citing_doc:Document)-[:CITES]->(d)
-    
-    RETURN 
-        author.name as author_name, 
-        dept.name as dept_name,
-        collect(DISTINCT 'Same Author: ' + other_doc.title) as same_author_docs,
-        collect(DISTINCT 'Cites: ' + cited_doc.title) as cited_docs,
-        collect(DISTINCT 'Cited By: ' + citing_doc.title) as citing_docs
-    """
-    try:
-        print(f"DEBUG: Expanding context for doc_id: {doc_id}")
-        result = state.graph.query(query, params={"doc_id": doc_id})
-        print(f"DEBUG: Query result: {result}")
-        
-        if not result:
-            return ""
-        
-        record = result[0]
-        context_str = f"  [Metadata & Relations]\n"
-        
-        # Author & Dept
-        if record['author_name']:
-            context_str += f"  - Author: {record['author_name']}"
-            if record['dept_name']:
-                context_str += f" (Dept: {record['dept_name']})"
-            context_str += "\n"
-            
-        # Combine related documents
-        related_docs = record['cited_docs'] + record['same_author_docs']
-        related_docs = [rd for rd in related_docs if rd and 'null' not in rd]
-        
-        if related_docs:
-            context_str += f"  - Related Docs (via Citations or Author):\n    " + "\n    ".join(related_docs[:6]) + "\n"
-            
-        return context_str
-    except Exception as e:
-        print(f"Error executing Cypher expansion: {e}")
-        return ""
+    return ""
 
 # --- Lifespan Manager ---
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("--- Starting Real GraphRAG Server ---")
-    
+    print("--- Starting Advanced GraphRAG Server ---")
     try:
-        # 1. Connect to Neo4j
-        print(" > Connecting to Neo4j...")
-        state.graph = Neo4jGraph(
-            url=NEO4J_URI, 
-            username=NEO4J_USER, 
-            password=NEO4J_PASSWORD,
-            enhanced_schema=False, 
-            refresh_schema=False
+        state.graph = Neo4jGraph(url=NEO4J_URI, username=NEO4J_USER, password=NEO4J_PASSWORD, refresh_schema=False)
+        
+        # Initialize Vectors
+        embeddings = OpenAIEmbeddings()
+        state.doc_vector = Neo4jVector.from_existing_graph(
+            embeddings, url=NEO4J_URI, username=NEO4J_USER, password=NEO4J_PASSWORD,
+            index_name="document_embedding_index", node_label="Document", text_node_properties=["content"]
         )
-        
-        # Real Schema Injection
-        state.graph.schema = """
-        Node properties:
-        - Document {title: STRING, date: STRING, doc_id: STRING}
-        - Person {name: STRING}
-        - Department {name: STRING}
-        Relationships:
-        (:Person)-[:AUTHORED]->(:Document)
-        (:Person)-[:BELONGS_TO]->(:Department)
-        (:Document)-[:CITES]->(:Document)
-        """
-        print(" > Neo4j Connected & Schema Injected")
-        
-        # 2. Initialize Vector Index
-        # Since we don't have full body content in DB yet, we use 'title' for embedding.
-        # Ideally, we should have a 'content' field populated from the parsed markdown files.
-        print(" > Initializing Vector Index on 'title'...")
-        state.vector_index = Neo4jVector.from_existing_graph(
-            embedding=OpenAIEmbeddings(),
-            url=NEO4J_URI,
-            username=NEO4J_USER,
-            password=NEO4J_PASSWORD,
-            index_name="real_doc_index",
-            node_label="Document",
-            text_node_properties=["title"], # Using Title as the search key for now
-            embedding_node_property="embedding",
+        state.complaint_vector = Neo4jVector.from_existing_graph(
+            embeddings, url=NEO4J_URI, username=NEO4J_USER, password=NEO4J_PASSWORD,
+            index_name="complaint_index", node_label="Complaint", text_node_properties=["content"]
         )
-        print(" > Vector Index Ready")
-        
+        print(" > Vectors & Graph Ready.")
     except Exception as e:
-        print(f"CRITICAL: Initialization failed: {e}")
-    
+        print(f"Init Error: {e}")
     yield
-    print("--- Shutting Down Server ---")
 
-# --- FastAPI App ---
-app = FastAPI(title="Seoul Youth Policy GraphRAG", lifespan=lifespan)
+app = FastAPI(title="Seoul Youth Policy Advanced RAG", lifespan=lifespan)
 
 class SearchRequest(BaseModel):
     query: str
 
-class SourceDocument(BaseModel):
-    title: str
-    doc_id: str
-    graph_context: str
-
-class SearchResponse(BaseModel):
-    answer: str
-    sources: List[SourceDocument]
-
-@app.post("/api/search", response_model=SearchResponse)
+@app.post("/api/search")
 async def search(request: SearchRequest):
-    if not state.vector_index:
-        raise HTTPException(status_code=503, detail="Service not ready")
-
-    print(f"Processing query: {request.query}")
-    
-    # 1. Vector Retrieval (Increased to k=5)
-    docs = state.vector_index.similarity_search(request.query, k=5)
+    # 1. Search both indexes
+    c_docs = state.complaint_vector.similarity_search(request.query, k=2)
+    d_docs = state.doc_vector.similarity_search(request.query, k=2)
     
     combined_context = ""
-    source_list = []
+    sources = []
     
-    # 2. Graph Expansion (2-Hop)
-    for doc in docs:
-        title = doc.page_content 
-        # Extract and clean doc_id
-        doc_id = str(doc.metadata.get('doc_id', 'Unknown')).strip()
+    # Process Complaints
+    for doc in c_docs:
+        idx = doc.metadata['index']
+        graph_info = get_trace_context(idx, "Complaint")
+        combined_context += f"[Complaint]: {doc.page_content[:300]}\n{graph_info}\n---\n"
+        sources.append({"type": "Complaint", "title": doc.page_content[:50], "id": str(idx)})
         
-        # Get expanded context using cleaned DOC_ID
-        graph_info = get_expanded_context(doc_id)
-        
-        # Build Context
-        chunk = f"Document: {title}\nDoc ID: {doc_id}\n{graph_info}\n---\n"
-        combined_context += chunk
-        
-        source_list.append(SourceDocument(
-            title=title,
-            doc_id=doc_id,
-            graph_context=graph_info.strip()
-        ))
+    # Process Documents
+    for doc in d_docs:
+        doc_id = doc.metadata['doc_id']
+        graph_info = get_trace_context(doc_id, "Document")
+        combined_context += f"[Document]: {doc.metadata['title']}\nContent: {doc.page_content[:300]}\n{graph_info}\n---\n"
+        sources.append({"type": "Document", "title": doc.metadata['title'], "id": doc_id})
 
-    # 3. Generation
+    # 2. Generate Answer
     template = """
-    You are an expert on Seoul Youth Policy documents.
-    Answer the user's question using the provided context.
-    
-    The context includes:
-    - Document Titles
-    - Authors and their Departments
-    - Related Documents (Citations)
+    당신은 서울시 청년정책 전문가입니다. 제공된 민원(Complaint)과 공문서(Document) 정보를 바탕으로 답변하세요.
+    질문과 관련된 민원 사례가 있다면 언급하고, 그 해결 근거가 되는 공문서와 담당자 정보를 반드시 포함하세요.
     
     Context:
     {context}
     
     Question: {question}
-    
-    Answer in Korean. Be specific about document names and authors.
     """
-    
     prompt = ChatPromptTemplate.from_template(template)
     llm = ChatOpenAI(model="gpt-4o")
-    chain = prompt | llm | StrOutputParser()
+    answer = (prompt | llm | StrOutputParser()).invoke({"context": combined_context, "question": request.query})
     
-    try:
-        answer = chain.invoke({"context": combined_context, "question": request.query})
-    except Exception as e:
-        answer = f"Error generating answer: {e}"
-
-    return SearchResponse(answer=answer, sources=source_list)
+    return {"answer": answer, "sources": sources}
 
 @app.get("/health")
-def health():
-    return {"status": "ok"}
+def health(): return {"status": "ok"}

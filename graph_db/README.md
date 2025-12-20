@@ -1,8 +1,22 @@
-# Neo4j GraphRAG 학습 및 프로토타입 프로젝트
+# 서울시 청년정책 공문서-민원 GraphRAG 시스템
 
-이 프로젝트는 **Neo4j**, **LangChain**, **FastAPI**, 그리고 **OpenAI**를 활용하여 **Graph Retrieval-Augmented Generation (GraphRAG)** 시스템을 구축하는 과정을 기록한 프로젝트입니다.
+이 프로젝트는 **서울시 청년수당 공문서**와 **민원 답변 데이터**를 결합하여, 민원 사례로부터 정책적 근거(공문서)와 담당자를 추적할 수 있는 **고도화된 Graph Retrieval-Augmented Generation (GraphRAG)** 시스템입니다.
 
-기본적인 그래프 조작부터, 자연어를 Cypher 쿼리로 변환하는 방법, 그리고 벡터 검색과 그래프 탐색을 결합한 **하이브리드 RAG API 서버** 구현까지의 내용을 담고 있습니다.
+---
+
+## 🏗️ 시스템 아키텍처
+
+1.  **지식 그래프 (Knowledge Graph)**:
+    *   **노드**: `Document` (공문서), `Complaint` (민원), `Person` (작성자), `Department` (부서).
+    *   **관계**: 
+        *   `AUTHORED`: 작성자 -> 문서
+        *   `BELONGS_TO`: 작성자 -> 부서
+        *   `CITES`: 문서 -> 문서 (인용)
+        *   `RELATED_TO`: 민원 -> 공문서 (벡터 유사도 기반 연결, **Top 5**)
+
+2.  **하이브리드 검색 (Hybrid Retrieval)**:
+    *   사용자 질문에 대해 **공문서 본문**과 **민원 본문**을 동시에 벡터 검색.
+    *   검색된 노드로부터 그래프 탐색을 통해 관련 담당자 및 근거 문서를 확보 (Multi-hop Trace).
 
 ---
 
@@ -10,139 +24,64 @@
 
 | 파일명 | 설명 |
 |------|-------------|
-| `101_neo4j_study.py` | Neo4j 기초 (노드 생성, 관계 연결, 기초 Cypher 쿼리 실행). |
-| `102_neo4j_llm_qa.py` | **Text-to-Cypher**: LLM을 이용해 자연어 질문을 Cypher 쿼리로 변환하여 실행. |
-| `201_neo4j_seed_data.py` | **데이터 시딩**: 가상의 IT 기업 'Sinoic Tech'의 인물, 팀, 문서 데이터를 구축. |
-| `202_neo4j_hybrid_rag.py` | **Hybrid GraphRAG**: 벡터 검색 + 그래프 탐색을 결합한 프로토타입 스크립트. |
-| `api_server.py` | **API 서버**: FastAPI 기반의 GraphRAG 검색 API (운영 환경용). |
-| `test_api.py` | **API 테스트**: 서버를 자동으로 띄우고 테스트 요청을 보내는 스크립트. |
+| `301_build_real_graph.py` | 공문서 메타데이터 및 인용 관계 DB 구축. |
+| `303_update_doc_content.py` | 공문서 노드에 MD 파일 본문을 업데이트하고 벡터 인덱스 생성. |
+| `302_add_complaints_node.py` | 민원 데이터를 추가하고 공문서와 유사도 기반 연결 (Top 5). |
+| `api_server_real.py` | **최종 API 서버**: 민원-공문서 통합 검색 및 추적 답변 기능. |
+| `test_api.py` | 서버 기능 검증용 테스트 스크립트. |
 
 ---
 
-## 🛠️ 주요 학습 내용 및 에러 해결 (중요!)
+## 🚀 설치 및 서버 실행 방법
 
-### 1. APOC 플러그인 에러 해결 (`Could not use APOC procedures`)
-LangChain의 `Neo4jGraph`를 사용할 때 가장 흔히 발생하는 에러입니다.
-> `Could not use APOC procedures. Please ensure the APOC plugin is installed...`
-
-**원인**: LangChain은 내부적으로 APOC 플러그인(`apoc.meta.data`)을 사용하여 DB 스키마를 자동으로 분석하려 합니다. 하지만 Docker 환경 등에서 이 플러그인이 없거나 권한이 제한된 경우 에러가 발생합니다.
-
-**✅ 해결 방법 (수동 스키마 주입 패턴)**
-플러그인 설치와 씨름하는 대신, 자동 체크를 끄고 **스키마를 직접 정의**해주는 것이 가장 확실한 해결책입니다.
-
-1.  **전용 패키지 사용**: `langchain-neo4j` 패키지를 설치합니다.
-2.  **초기화 옵션 조절**:
-    ```python
-    graph = Neo4jGraph(
-        url=..., username=..., password=...,
-        enhanced_schema=False,  # APOC 기반 강화 스키마 비활성화
-        refresh_schema=False    # 초기화 시 자동 스키마 로드 비활성화
-    )
+### 1. 환경 설정
+*   **필수 요구사항**: Python 3.12+, Neo4j DB (Docker 등), OpenAI API Key.
+*   **의존성 설치**:
+    ```bash
+    uv sync
     ```
-3.  **스키마 수동 주입**:
-    ```python
-    graph.schema = """
-    Node properties:
-    - Document {title: STRING, content: STRING}
-    Relationships:
-    (:Person)-[:AUTHORED]->(:Document)
-    """
+*   **.env 파일 작성**:
+    ```env
+    OPENAI_API_KEY=your_key_here
+    NEO4J_URI=bolt://localhost:7687
+    NEO4J_USERNAME=neo4j
+    NEO4J_PASSWORD=testpassword
     ```
 
-### 2. 하이브리드(Hybrid) RAG 프로세스
-단순히 텍스트만 찾는 것이 아니라, 그래프의 구조적 정보를 함께 활용합니다.
-
-1.  **임베딩(Indexing)**: `Document` 노드의 `content` 내용을 벡터화하여 Neo4j에 저장합니다.
-2.  **벡터 검색(Retrieval)**: 사용자 질문과 의미적으로 가장 유사한 문서 노드를 찾습니다.
-3.  **그래프 확장(Expansion)**: 찾은 문서와 연결된 저자(Author), 언급된 기술(Topic), 소속 팀(Team) 정보를 Cypher로 긁어옵니다.
-4.  **최종 답변(Generation)**: "문서 내용 + 그래프에서 가져온 관계 정보"를 LLM에게 전달하여 훨씬 정확하고 풍부한 답변을 생성합니다.
-
----
-
-## 🌐 API 서버 가이드
-
-FastAPI를 사용하여 구축된 GraphRAG 서버 사용법입니다.
-
-### 1. 서버 실행
+### 2. 데이터베이스 구축 (최초 1회)
+순서대로 실행하여 그래프를 생성하고 인덱스를 빌드합니다.
 ```bash
-# 개발 모드 (코드 수정 시 자동 재시작)
-uv run uvicorn api_server:app --reload
+# 1. 공문서 기초 데이터 구축
+uv run 301_build_real_graph.py
 
-# 운영 모드 (포트 8000)
-uv run uvicorn api_server:app --host 0.0.0.0 --port 8000
+# 2. 공문서 본문 업데이트 및 벡터 인덱스 생성
+uv run 303_update_doc_content.py
+
+# 3. 민원 데이터 추가 및 공문서 연결 (Top 5)
+uv run 302_add_complaints_node.py
 ```
 
-### 2. API 명세 (Specification)
-
-#### 헬스 체크 (Health Check)
-- **URL**: `GET /health`
-- **Response**:
-  ```json
-  {
-    "status": "ok",
-    "neo4j_connected": true
-  }
-  ```
-
-#### 검색 (Search)
-- **URL**: `POST /api/search`
-- **Content-Type**: `application/json`
-- **Request Body**:
-  ```json
-  {
-    "query": "보안 관련 문서를 쓴 사람은 누구야?"
-  }
-  ```
-- **Response Body**:
-  ```json
-  {
-    "answer": "보안 관련 문서는 Charlie가 작성했습니다. 그는 DevOps 엔지니어입니다.",
-    "sources": [
-      {
-        "title": "Q3 DevOps Strategy",
-        "content": "Charlie proposed moving our infrastructure...",
-        "graph_context": "Author: Charlie (DevOps Engineer)\nMentions: Cloud Computing"
-      }
-    ]
-  }
-  ```
+### 3. API 서버 실행
+```bash
+# 서버 실행 (Port 8000)
+uv run uvicorn api_server_real:app --host 0.0.0.0 --port 8000 --reload
+```
 
 ---
 
-## 🚀 전체 실행 순서
+## 🌐 API 사용법
 
-### 사전 준비
-- Neo4j DB 실행 중 (Docker 등)
-- `.env` 파일에 `OPENAI_API_KEY`, `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD` 설정 완료
-
-### 단계별 실행
-1.  **데이터 구축**: (기존 데이터를 삭제하고 가상 데이터를 채웁니다)
-    ```bash
-    uv run 201_neo4j_seed_data.py
+### 검색 엔드포인트
+*   **URL**: `POST /api/search`
+*   **Payload**:
+    ```json
+    { "query": "서류 미비로 지급이 중단된 경우의 해결책과 담당자는?" }
     ```
-2.  **API 서버 실행**:
-    ```bash
-    uv run uvicorn api_server:app --reload
-    ```
-3.  **테스트 요청** (새 터미널):
-    ```bash
-    curl -X POST http://localhost:8000/api/search \
-         -H "Content-Type: application/json" \
-         -d '{"query": "Frank는 무엇을 공부하고 있어?"}'
-    ```
+*   **특징**: 질문과 유사한 민원 사례를 찾고, 그 민원과 연결된(RELATED_TO) 실제 공문서와 담당 부서 정보를 결합하여 답변을 생성합니다.
 
 ---
 
-## 📝 Cypher 치트시트 (DB 확인용)
-
-**전체 데이터 시각화:**
-```cypher
-MATCH (n)-[r]->(m) RETURN n, r, m
-```
-
-**임베딩 저장 여부 확인:**
-```cypher
-MATCH (d:Document) 
-RETURN d.title, size(d.embedding) AS vector_dim 
-LIMIT 5
-```
+## 📝 주요 문제 해결 기록
+*   **APOC 이슈**: `refresh_schema=False`와 수동 스키마 주입으로 해결.
+*   **데이터 정제**: CSV의 `\r` 등 숨은 공백 제거를 위해 `.strip()` 필수 적용.
+*   **추적성 강화**: 단순 1-hop을 넘어 민원-공문서-작성자로 이어지는 Multi-hop 쿼리 최적화.
