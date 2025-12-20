@@ -67,6 +67,13 @@ uv run 302_add_complaints_node.py
 uv run uvicorn api_server_real:app --host 0.0.0.0 --port 8000 --reload
 ```
 
+### 4. 웹 프런트엔드 접속
+API 서버가 실행된 뒤 브라우저에서 `http://localhost:8000/`으로 접속하면 다음 기능을 한 페이지에서 제공합니다.
+
+- 사용자 질문 입력 및 답변 표시
+- 검색된 민원/공문서 컨텍스트 요약
+- 그래프 전체 시각화 및 검색 시 참조된 노드 하이라이팅
+
 ---
 
 ## 🌐 API 사용법
@@ -78,6 +85,11 @@ uv run uvicorn api_server_real:app --host 0.0.0.0 --port 8000 --reload
     { "query": "서류 미비로 지급이 중단된 경우의 해결책과 담당자는?" }
     ```
 *   **특징**: 질문과 유사한 민원 사례를 찾고, 그 민원과 연결된(RELATED_TO) 실제 공문서와 담당 부서 정보를 결합하여 답변을 생성합니다.
+
+### 그래프 스냅샷 엔드포인트
+*   **URL**: `GET /api/graph/overview`
+*   **Query**: `limit` (선택, 기본 300) — 반환할 노드 최대 개수
+*   **응답**: 그래프 시각화에 필요한 노드/관계 목록
 
 ---
 

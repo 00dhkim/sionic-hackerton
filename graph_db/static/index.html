@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Graph RAG Explorer</title>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #0f172a;
+      --card: #1e293b;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --border: #1f2937;
+      --text: #e2e8f0;
+      --surface: #0b1222;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(145deg, #0b1222, #0f172a);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    header {
+      padding: 32px 24px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    header h1 { margin: 0; font-size: 28px; letter-spacing: -0.3px; }
+    header p { margin: 0; color: var(--muted); }
+    main { padding: 0 24px 40px; display: grid; gap: 16px; }
+    section.card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.25);
+    }
+    section.card h2 { margin: 0 0 8px; font-size: 18px; }
+    .flex { display: flex; gap: 12px; flex-wrap: wrap; }
+    .input {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      padding: 12px;
+      width: 100%;
+      resize: vertical;
+      min-height: 60px;
+    }
+    .button {
+      background: linear-gradient(120deg, #2563eb, #22d3ee);
+      border: none;
+      color: white;
+      padding: 12px 16px;
+      border-radius: 10px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 10px 25px rgba(34, 211, 238, 0.25);
+      transition: transform 0.08s ease-in-out, box-shadow 0.08s ease-in-out;
+    }
+    .button:hover { transform: translateY(-1px); box-shadow: 0 12px 30px rgba(34, 211, 238, 0.35); }
+    .button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .answer {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      white-space: pre-wrap;
+      min-height: 80px;
+    }
+    .context-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 10px;
+    }
+    .context-card {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .context-card h4 { margin: 0 0 6px; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      font-size: 12px;
+      border-radius: 999px;
+      background: rgba(56, 189, 248, 0.1);
+      color: #38bdf8;
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      margin-right: 6px;
+    }
+    .muted { color: var(--muted); font-size: 14px; }
+    #graph {
+      width: 100%;
+      height: 520px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+    .legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .legend .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+    .error { color: #fb7185; font-weight: 600; }
+    .small { font-size: 13px; color: var(--muted); }
+    .highlight { stroke: #f59e0b !important; stroke-width: 3px; }
+    .graph-link { stroke: #475569; stroke-width: 1.2px; opacity: 0.7; }
+    .graph-link text { fill: var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>서울시 청년정책 Graph RAG 대시보드</h1>
+    <p>민원·공문서 GraphDB와 연동된 검색, 문맥, 그래프 시각화를 한 곳에서 확인하세요.</p>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>질문 입력</h2>
+      <form id="queryForm">
+        <div class="flex">
+          <textarea id="queryInput" class="input" placeholder="예) 지급이 중단된 민원과 관련 근거 문서를 알려줘" required></textarea>
+        </div>
+        <div class="flex" style="justify-content: space-between; align-items: center; margin-top: 8px;">
+          <div class="small" id="statusText">API 서버와 그래프에 연결 중...</div>
+          <div>
+            <button type="submit" class="button" id="searchButton">검색 및 그래프 업데이트</button>
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>답변</h2>
+      <div id="answerBox" class="answer">검색 후 답변이 여기에 표시됩니다.</div>
+    </section>
+
+    <section class="card">
+      <h2>가져온 컨텍스트</h2>
+      <div class="context-grid">
+        <div>
+          <h3>민원 (Complaint)</h3>
+          <div id="complaintList" class="muted">검색 결과가 없습니다.</div>
+        </div>
+        <div>
+          <h3>공문서 (Document)</h3>
+          <div id="documentList" class="muted">검색 결과가 없습니다.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div style="display:flex; justify-content: space-between; align-items: center;">
+        <h2>그래프 시각화</h2>
+        <div class="legend">
+          <span><span class="dot" style="background:#2563eb"></span>Document</span>
+          <span><span class="dot" style="background:#f97316"></span>Complaint</span>
+          <span><span class="dot" style="background:#22c55e"></span>Person</span>
+          <span><span class="dot" style="background:#a855f7"></span>Department</span>
+        </div>
+      </div>
+      <div class="small" id="graphInfo">그래프를 불러오는 중...</div>
+      <svg id="graph"></svg>
+    </section>
+  </main>
+
+  <script>
+    const queryForm = document.getElementById('queryForm');
+    const queryInput = document.getElementById('queryInput');
+    const searchButton = document.getElementById('searchButton');
+    const answerBox = document.getElementById('answerBox');
+    const complaintList = document.getElementById('complaintList');
+    const documentList = document.getElementById('documentList');
+    const statusText = document.getElementById('statusText');
+    const graphInfo = document.getElementById('graphInfo');
+    const graphSvg = d3.select('#graph');
+
+    const colors = {
+      Document: '#2563eb',
+      Complaint: '#f97316',
+      Person: '#22c55e',
+      Department: '#a855f7',
+      default: '#94a3b8'
+    };
+
+    let graphState = { nodes: [], edges: [] };
+    let simulation;
+
+    async function fetchGraph() {
+      graphInfo.textContent = '그래프를 불러오는 중...';
+      try {
+        const res = await fetch('/api/graph/overview');
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        graphState = data;
+        renderGraph(data);
+        graphInfo.textContent = `노드 ${data.nodes.length}개, 관계 ${data.edges.length}개를 표시합니다.`;
+        statusText.textContent = '그래프/검색 API 연결 완료';
+      } catch (err) {
+        graphInfo.textContent = '그래프를 불러오는 데 실패했습니다. 서버 상태를 확인하세요.';
+        statusText.textContent = '그래프 로드 실패';
+        console.error(err);
+      }
+    }
+
+    function renderGraph(data) {
+      const width = graphSvg.node().clientWidth || 900;
+      const height = graphSvg.node().clientHeight || 520;
+      graphSvg.attr('width', width).attr('height', height);
+      graphSvg.selectAll('*').remove();
+
+      const links = data.edges.map(d => ({ ...d }));
+      const nodes = data.nodes.map(d => ({ ...d }));
+
+      simulation = d3.forceSimulation(nodes)
+        .force('link', d3.forceLink(links).id(d => d.id).distance(140).strength(0.6))
+        .force('charge', d3.forceManyBody().strength(-260))
+        .force('center', d3.forceCenter(width / 2, height / 2))
+        .force('collision', d3.forceCollide().radius(40));
+
+      const link = graphSvg.append('g')
+        .attr('stroke', '#475569')
+        .selectAll('line')
+        .data(links)
+        .join('line')
+        .attr('class', 'graph-link')
+        .attr('marker-end', 'url(#arrow)');
+
+      const linkLabel = graphSvg.append('g')
+        .selectAll('text')
+        .data(links)
+        .join('text')
+        .attr('font-size', 10)
+        .attr('fill', '#94a3b8')
+        .text(d => d.type);
+
+      graphSvg.append('defs').append('marker')
+        .attr('id', 'arrow')
+        .attr('viewBox', '0 -5 10 10')
+        .attr('refX', 15)
+        .attr('refY', 0)
+        .attr('markerWidth', 6)
+        .attr('markerHeight', 6)
+        .attr('orient', 'auto')
+        .append('path')
+        .attr('d', 'M0,-5L10,0L0,5')
+        .attr('fill', '#475569');
+
+      const node = graphSvg.append('g')
+        .selectAll('circle')
+        .data(nodes)
+        .join('circle')
+        .attr('r', 12)
+        .attr('fill', d => colors[d.primary_label] || colors.default)
+        .attr('stroke', '#0f172a')
+        .attr('stroke-width', 1.5)
+        .append('title')
+        .text(d => `${d.primary_label}: ${d.display || d.id}`);
+
+      const labels = graphSvg.append('g')
+        .selectAll('text')
+        .data(nodes)
+        .join('text')
+        .attr('font-size', 11)
+        .attr('fill', '#e2e8f0')
+        .attr('text-anchor', 'middle')
+        .attr('dy', -16)
+        .text(d => d.display || d.primary_label);
+
+      simulation.on('tick', () => {
+        link
+          .attr('x1', d => d.source.x)
+          .attr('y1', d => d.source.y)
+          .attr('x2', d => d.target.x)
+          .attr('y2', d => d.target.y);
+
+        linkLabel
+          .attr('x', d => (d.source.x + d.target.x) / 2)
+          .attr('y', d => (d.source.y + d.target.y) / 2);
+
+        labels
+          .attr('x', d => d.x)
+          .attr('y', d => d.y);
+
+        graphSvg.selectAll('circle')
+          .attr('cx', d => d.x)
+          .attr('cy', d => d.y);
+      });
+    }
+
+    function renderContext(context) {
+      complaintList.innerHTML = '';
+      documentList.innerHTML = '';
+
+      if (!context || (context.complaints?.length === 0 && context.documents?.length === 0)) {
+        complaintList.textContent = '검색 결과가 없습니다.';
+        documentList.textContent = '검색 결과가 없습니다.';
+        return;
+      }
+
+      if (context.complaints?.length) {
+        context.complaints.forEach((item) => {
+          const card = document.createElement('div');
+          card.className = 'context-card';
+          card.innerHTML = `
+            <div class="badge">Complaint #${item.id}</div>
+            <p class="muted">${item.snippet}</p>
+            <div class="small" style="margin-top:8px;">연결된 공문서</div>
+          `;
+          const list = document.createElement('ul');
+          list.className = 'small';
+          if (item.related_documents.length === 0) {
+            list.innerHTML = '<li class="muted">연결된 공문서가 없습니다.</li>';
+          } else {
+            item.related_documents.forEach(doc => {
+              const li = document.createElement('li');
+              const score = doc.similarity ? ` (score: ${doc.similarity.toFixed(3)})` : '';
+              li.textContent = `${doc.title || '제목 없음'} / 담당자: ${doc.author || 'N/A'}${score}`;
+              list.appendChild(li);
+            });
+          }
+          card.appendChild(list);
+          complaintList.appendChild(card);
+        });
+      } else {
+        complaintList.textContent = '검색된 민원이 없습니다.';
+      }
+
+      if (context.documents?.length) {
+        context.documents.forEach((item) => {
+          const card = document.createElement('div');
+          card.className = 'context-card';
+          card.innerHTML = `
+            <div class="badge">Document ${item.id}</div>
+            <h4>${item.title}</h4>
+            <p class="muted">${item.snippet}</p>
+          `;
+          const meta = document.createElement('div');
+          meta.className = 'small';
+          const author = item.metadata?.author ? `작성자: ${item.metadata.author}` : '작성자 정보 없음';
+          const dept = item.metadata?.department ? ` / 부서: ${item.metadata.department}` : '';
+          meta.innerHTML = `<div>${author}${dept}</div>`;
+
+          const citations = document.createElement('div');
+          citations.className = 'small';
+          if (item.metadata?.citations?.length) {
+            const citedTitles = item.metadata.citations.map(c => c.title).filter(Boolean).slice(0, 5);
+            citations.innerHTML = `<div>인용: ${citedTitles.join(', ')}</div>`;
+          } else {
+            citations.innerHTML = '<div>인용 정보 없음</div>';
+          }
+          card.appendChild(meta);
+          card.appendChild(citations);
+          documentList.appendChild(card);
+        });
+      } else {
+        documentList.textContent = '검색된 공문서가 없습니다.';
+      }
+    }
+
+    function highlightGraphNodes(nodeIds = []) {
+      if (!graphState.nodes.length) return;
+      const idSet = new Set(nodeIds);
+      graphSvg.selectAll('circle')
+        .classed('highlight', d => idSet.has(d.id));
+    }
+
+    async function handleSearch(event) {
+      event.preventDefault();
+      const query = queryInput.value.trim();
+      if (!query) return;
+
+      searchButton.disabled = true;
+      statusText.textContent = '검색 및 추론 중...';
+      answerBox.textContent = '답변을 생성하고 있습니다...';
+
+      try {
+        const res = await fetch('/api/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query })
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        answerBox.textContent = data.answer || '답변이 비어 있습니다.';
+        renderContext(data.context);
+        highlightGraphNodes(data.highlighted_nodes || []);
+        statusText.textContent = '검색 완료';
+      } catch (err) {
+        answerBox.innerHTML = `<span class="error">검색 실패: ${err.message}</span>`;
+        statusText.textContent = '검색 실패';
+        console.error(err);
+      } finally {
+        searchButton.disabled = false;
+      }
+    }
+
+    queryForm.addEventListener('submit', handleSearch);
+    fetchGraph();
+  </script>
+</body>
+</html>
