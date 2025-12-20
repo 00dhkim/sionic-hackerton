@@ -1,4 +1,6 @@
-# 서울시 청년정책 공문서-민원 통합 GraphRAG 시스템
+# 공무원이라도 graph RAG 하고싶어
+
+서울시 청년정책 공문서-민원 통합 GraphRAG 시스템
 
 > 1st Place Winner of Instruct.KR x Sionic 2025 Hackathon<br>
 > 발표자료: [https://docs.google.com/presentation/d/14w9O2muEAtX1wCSyr8blcgLKZR_diBEYmZjQwv0opMI/edit?usp=sharing](https://docs.google.com/presentation/d/14w9O2muEAtX1wCSyr8blcgLKZR_diBEYmZjQwv0opMI/edit?usp=sharing)
