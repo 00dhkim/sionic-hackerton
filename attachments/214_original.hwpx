@@ -1,0 +1,1 @@
+<script>alert('존재하지 않는 파일입니다.');window.close();</script>
