@@ -383,8 +383,8 @@
           card.className = 'context-card';
           card.innerHTML = `
             <div class="badge">Complaint #${item.id}</div>
-            <p class="muted">${item.snippet}</p>
-            <div class="small" style="margin-top:8px;">연결된 공문서</div>
+            <div class="muted" style="white-space: pre-wrap; margin: 8px 0;">${item.content || item.snippet}</div>
+            <div class="small" style="margin-top:8px; border-top: 1px solid var(--border); padding-top: 8px;">연결된 공문서</div>
           `;
           const list = document.createElement('ul');
           list.className = 'small';
@@ -412,7 +412,7 @@
           card.innerHTML = `
             <div class="badge">Document ${item.id}</div>
             <h4>${item.title}</h4>
-            <p class="muted">${item.snippet}</p>
+            <div class="muted" style="white-space: pre-wrap; margin: 8px 0;">${item.content || item.snippet}</div>
           `;
           const meta = document.createElement('div');
           meta.className = 'small';
