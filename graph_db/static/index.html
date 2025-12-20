@@ -104,15 +104,46 @@
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 12px;
+      user-select: none;
     }
     .legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
     .legend span { display: inline-flex; align-items: center; gap: 6px; }
     .legend .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
     .error { color: #fb7185; font-weight: 600; }
     .small { font-size: 13px; color: var(--muted); }
-    .highlight { stroke: #f59e0b !important; stroke-width: 3px; }
+    .node-group.highlight circle { 
+      stroke: #facc15 !important; 
+      stroke-width: 6px !important;
+      filter: drop-shadow(0 0 12px #facc15);
+    }
+    .node-label {
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+      font-size: 11px;
+      fill: #e2e8f0;
+      text-anchor: middle;
+    }
+    /* Show label on hover, when node has active class (clicked), or when highlighted */
+    .node-group:hover .node-label,
+    .node-group.active .node-label,
+    .node-group.highlight .node-label {
+      opacity: 1;
+    }
+    .link-label {
+      display: none; /* Always hide relationship labels */
+    }
+    /* Force show node labels only when the parent has show-all-labels class */
+    #graph.show-all-labels .node-label {
+      opacity: 1;
+    }
     .graph-link { stroke: #475569; stroke-width: 1.2px; opacity: 0.7; }
-    .graph-link text { fill: var(--muted); }
+    .graph-link.highlight-link {
+      stroke: #facc15 !important;
+      stroke-width: 2px !important;
+      opacity: 0.9 !important;
+      filter: drop-shadow(0 0 2px #facc15);
+    }
   </style>
 </head>
 <body>
@@ -157,13 +188,18 @@
     </section>
 
     <section class="card">
-      <div style="display:flex; justify-content: space-between; align-items: center;">
+      <div style="display:flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
         <h2>그래프 시각화</h2>
-        <div class="legend">
-          <span><span class="dot" style="background:#2563eb"></span>Document</span>
-          <span><span class="dot" style="background:#f97316"></span>Complaint</span>
-          <span><span class="dot" style="background:#22c55e"></span>Person</span>
-          <span><span class="dot" style="background:#a855f7"></span>Department</span>
+        <div class="flex" style="align-items: center; gap: 16px;">
+          <label class="small" style="display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--accent);">
+            <input type="checkbox" id="toggleLabels"> 모든 라벨 표시
+          </label>
+          <div class="legend">
+            <span><span class="dot" style="background:#2563eb"></span>Document</span>
+            <span><span class="dot" style="background:#f97316"></span>Complaint</span>
+            <span><span class="dot" style="background:#22c55e"></span>Person</span>
+            <span><span class="dot" style="background:#a855f7"></span>Department</span>
+          </div>
         </div>
       </div>
       <div class="small" id="graphInfo">그래프를 불러오는 중...</div>
@@ -181,6 +217,11 @@
     const statusText = document.getElementById('statusText');
     const graphInfo = document.getElementById('graphInfo');
     const graphSvg = d3.select('#graph');
+    const toggleLabels = document.getElementById('toggleLabels');
+
+    toggleLabels.addEventListener('change', (e) => {
+      graphSvg.classed('show-all-labels', e.target.checked);
+    });
 
     const colors = {
       Document: '#2563eb',
@@ -216,6 +257,18 @@
       graphSvg.attr('width', width).attr('height', height);
       graphSvg.selectAll('*').remove();
 
+      // Container for all graph elements to support zoom
+      const container = graphSvg.append('g');
+
+      // Add zoom behavior
+      const zoom = d3.zoom()
+        .scaleExtent([0.1, 8])
+        .on('zoom', (event) => {
+          container.attr('transform', event.transform);
+        });
+
+      graphSvg.call(zoom);
+
       const links = data.edges.map(d => ({ ...d }));
       const nodes = data.nodes.map(d => ({ ...d }));
 
@@ -225,22 +278,7 @@
         .force('center', d3.forceCenter(width / 2, height / 2))
         .force('collision', d3.forceCollide().radius(40));
 
-      const link = graphSvg.append('g')
-        .attr('stroke', '#475569')
-        .selectAll('line')
-        .data(links)
-        .join('line')
-        .attr('class', 'graph-link')
-        .attr('marker-end', 'url(#arrow)');
-
-      const linkLabel = graphSvg.append('g')
-        .selectAll('text')
-        .data(links)
-        .join('text')
-        .attr('font-size', 10)
-        .attr('fill', '#94a3b8')
-        .text(d => d.type);
-
+      // Define arrow marker
       graphSvg.append('defs').append('marker')
         .attr('id', 'arrow')
         .attr('viewBox', '0 -5 10 10')
@@ -253,24 +291,64 @@
         .attr('d', 'M0,-5L10,0L0,5')
         .attr('fill', '#475569');
 
-      const node = graphSvg.append('g')
-        .selectAll('circle')
+      const link = container.append('g')
+        .attr('stroke', '#475569')
+        .selectAll('line')
+        .data(links)
+        .join('line')
+        .attr('class', 'graph-link')
+        .attr('marker-end', 'url(#arrow)');
+
+      const linkLabel = container.append('g')
+        .selectAll('text')
+        .data(links)
+        .join('text')
+        .attr('class', 'link-label')
+        .attr('font-size', 10)
+        .attr('fill', '#94a3b8')
+        .text(d => d.type);
+
+      // Drag behavior
+      const drag = d3.drag()
+        .on('start', (event, d) => {
+          if (!event.active) simulation.alphaTarget(0.3).restart();
+          d.fx = d.x;
+          d.fy = d.y;
+        })
+        .on('drag', (event, d) => {
+          d.fx = event.x;
+          d.fy = event.y;
+        })
+        .on('end', (event, d) => {
+          if (!event.active) simulation.alphaTarget(0);
+          d.fx = null;
+          d.fy = null;
+        });
+
+      // Node groups to contain circle and text
+      const node = container.append('g')
+        .selectAll('g')
         .data(nodes)
-        .join('circle')
+        .join('g')
+        .attr('class', 'node-group')
+        .call(drag)
+        .on('click', function() {
+          const g = d3.select(this);
+          const isActive = g.classed('active');
+          g.classed('active', !isActive);
+        });
+
+      node.append('circle')
         .attr('r', 12)
         .attr('fill', d => colors[d.primary_label] || colors.default)
         .attr('stroke', '#0f172a')
-        .attr('stroke-width', 1.5)
-        .append('title')
+        .attr('stroke-width', 1.5);
+
+      node.append('title')
         .text(d => `${d.primary_label}: ${d.display || d.id}`);
 
-      const labels = graphSvg.append('g')
-        .selectAll('text')
-        .data(nodes)
-        .join('text')
-        .attr('font-size', 11)
-        .attr('fill', '#e2e8f0')
-        .attr('text-anchor', 'middle')
+      node.append('text')
+        .attr('class', 'node-label')
         .attr('dy', -16)
         .text(d => d.display || d.primary_label);
 
@@ -285,13 +363,7 @@
           .attr('x', d => (d.source.x + d.target.x) / 2)
           .attr('y', d => (d.source.y + d.target.y) / 2);
 
-        labels
-          .attr('x', d => d.x)
-          .attr('y', d => d.y);
-
-        graphSvg.selectAll('circle')
-          .attr('cx', d => d.x)
-          .attr('cy', d => d.y);
+        node.attr('transform', d => `translate(${d.x},${d.y})`);
       });
     }
 
@@ -368,8 +440,16 @@
     function highlightGraphNodes(nodeIds = []) {
       if (!graphState.nodes.length) return;
       const idSet = new Set(nodeIds);
-      graphSvg.selectAll('circle')
-        .classed('highlight', d => idSet.has(d.id));
+      const nodeGroups = graphSvg.selectAll('.node-group');
+      
+      nodeGroups.classed('highlight', d => idSet.has(d.id));
+      
+      // Highlight links where BOTH source and target are in the highlighted set
+      graphSvg.selectAll('.graph-link')
+        .classed('highlight-link', d => idSet.has(d.source.id) && idSet.has(d.target.id));
+      
+      // Bring highlighted nodes to front
+      nodeGroups.filter('.highlight').raise();
     }
 
     async function handleSearch(event) {
