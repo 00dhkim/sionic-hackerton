@@ -3,12 +3,19 @@ import json
 import time
 import subprocess
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Configuration
 API_URL_UPLOAD = "https://storm-apis.sionic.im/parse-router/api/v2/parse/by-file"
 API_URL_JOB = "https://storm-apis.sionic.im/parse-router/api/v2/parse/job/{}"
 TOKEN = "basi_01KCK7NGJF4DPYY6W8BZ954JHE"
 TARGET_DIRS = ["attachments", "attachments_complaints"]
+ERROR_LOG_FILE = "parse_errors.log"
+MAX_WORKERS = 20
+
+def log_error(file_id, filename, message):
+    with open(ERROR_LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - ID: {file_id} - File: {filename} - {message}\n")
 
 def upload_file(file_path):
     """Uploads file using curl and returns jobId"""
@@ -27,12 +34,9 @@ def upload_file(file_path):
         return response_data.get("jobId")
     except subprocess.CalledProcessError as e:
         print(f"Error uploading {file_path}: {e}")
-        print(f"Stdout: {e.stdout}")
-        print(f"Stderr: {e.stderr}")
         return None
     except json.JSONDecodeError as e:
         print(f"Error parsing JSON from upload response for {file_path}: {e}")
-        print(f"Raw output: {result.stdout}")
         return None
 
 def check_job_status(job_id):
@@ -51,89 +55,127 @@ def check_job_status(job_id):
         print(f"Error checking job {job_id}: {e}")
         return None
 
+def process_file(directory, filename):
+    file_path = os.path.join(directory, filename)
+    
+    # Determine output filename and ID
+    match = re.match(r"(\d+)_original", filename)
+    if match:
+        file_id = match.group(1)
+        output_filename = f"{file_id}_parsed.md"
+    else:
+        file_id = "unknown"
+        base_name = os.path.splitext(filename)[0]
+        output_filename = f"{base_name}_parsed.md"
+        
+    output_path = os.path.join(directory, output_filename)
+    
+    # Skip if already parsed
+    if os.path.exists(output_path):
+        return None # Return None to indicate skip
+        
+    print(f"Processing ID {file_id}: {filename}...")
+    
+    # 1. Upload
+    job_id = upload_file(file_path)
+    if not job_id:
+        log_error(file_id, filename, "Failed to get jobId (Upload failed)")
+        return f"ID {file_id}: Upload failed"
+        
+    # 2. Poll Status
+    retries = 0
+    max_retries = 24 # 24 * 5s = 120s timeout
+    
+    while retries < max_retries:
+        status_data = check_job_status(job_id)
+        
+        if not status_data:
+            time.sleep(5)
+            retries += 1
+            continue
+            
+        state = status_data.get("state")
+        
+        if state == "COMPLETED":
+            # 3. Save Result
+            pages = status_data.get("pages", [])
+            full_content = ""
+            for page in pages:
+                full_content += page.get("content", "") + "\n\n"
+            
+            with open(output_path, "w", encoding="utf-8") as f:
+                f.write(full_content)
+            
+            return f"ID {file_id}: Completed"
+            
+        elif state in ["FAILED", "ERRORED"]:
+            msg = status_data.get('errorMessage', 'Unknown error')
+            log_error(file_id, filename, f"Job state {state}: {msg}")
+            return f"ID {file_id}: Failed ({state})"
+            
+        elif state in ["REQUESTED", "PROCESSING", "PENDING", "ACCEPTED"]:
+            # Valid intermediate states
+            pass
+        else:
+            log_error(file_id, filename, f"Unknown state: {state}")
+        
+        time.sleep(5)
+        retries += 1
+    
+    log_error(file_id, filename, "Timed out")
+    return f"ID {file_id}: Timed out"
+
 def process_directory(directory):
-    print(f"Processing directory: {directory}")
+    print(f"Scanning directory: {directory}")
     if not os.path.exists(directory):
         print(f"Directory not found: {directory}")
         return
 
     files = [f for f in os.listdir(directory) if "_original" in f and not f.endswith(".md")]
-    files.sort() # Sort for consistent order
+    files.sort() 
     
-    total_files = len(files)
-    print(f"Found {total_files} files to process.")
-
-    for idx, filename in enumerate(files):
-        file_path = os.path.join(directory, filename)
-        
-        # Determine output filename
-        # Expected format: {id}_original.{ext} -> {id}_parsed.md
-        match = re.match(r"(\d+)_original", filename)
+    # Filter unparsed
+    unparsed_files = []
+    for f in files:
+        match = re.match(r"(\d+)_original", f)
         if match:
-            file_id = match.group(1)
-            output_filename = f"{file_id}_parsed.md"
+            out_name = f"{match.group(1)}_parsed.md"
         else:
-            # Fallback if regex doesn't match (though my previous script named them this way)
-            base_name = os.path.splitext(filename)[0]
-            output_filename = f"{base_name}_parsed.md"
-            
-        output_path = os.path.join(directory, output_filename)
+            out_name = f"{os.path.splitext(f)[0]}_parsed.md"
         
-        if os.path.exists(output_path):
-            print(f"[{idx+1}/{total_files}] Skipping {filename} (Already parsed)")
-            continue
+        if not os.path.exists(os.path.join(directory, out_name)):
+            unparsed_files.append(f)
             
-        print(f"[{idx+1}/{total_files}] Processing {filename}...")
+    total_files = len(unparsed_files)
+    print(f"Found {total_files} unparsed files in {directory}.")
+    
+    if total_files == 0:
+        return
+
+    failed_ids = []
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        future_to_file = {executor.submit(process_file, directory, f): f for f in unparsed_files}
         
-        # 1. Upload
-        job_id = upload_file(file_path)
-        if not job_id:
-            print("  Failed to get jobId. Skipping.")
-            continue
-            
-        print(f"  Job ID: {job_id}. Waiting for completion...")
-        
-        # 2. Poll Status
-        retries = 0
-        max_retries = 60 # 60 * 2s = 120s timeout
-        
-        while retries < max_retries:
-            status_data = check_job_status(job_id)
-            
-            if not status_data:
-                time.sleep(2)
-                retries += 1
-                continue
-                
-            state = status_data.get("state")
-            
-            if state == "COMPLETED":
-                # 3. Save Result
-                pages = status_data.get("pages", [])
-                full_content = ""
-                for page in pages:
-                    full_content += page.get("content", "") + "\n\n"
-                
-                with open(output_path, "w", encoding="utf-8") as f:
-                    f.write(full_content)
-                
-                print(f"  Saved parsed content to {output_filename}")
-                break
-            elif state == "FAILED":
-                print(f"  Job failed: {status_data.get('errorMessage')}")
-                break
-            elif state in ["REQUESTED", "PROCESSING", "PENDING"]:
-                # print(f"  State: {state}...") # Verbose
-                pass
-            else:
-                print(f"  Unknown state: {state}")
-            
-            time.sleep(2)
-            retries += 1
-        
-        if retries >= max_retries:
-            print("  Timed out waiting for job completion.")
+        for future in as_completed(future_to_file):
+            f = future_to_file[future]
+            try:
+                result = future.result()
+                if result:
+                    print(result)
+                    if "Failed" in result or "Timed out" in result:
+                         # Extract ID for summary
+                         match = re.match(r"(\d+)_original", f)
+                         if match:
+                             failed_ids.append(match.group(1))
+            except Exception as exc:
+                print(f"{f} generated an exception: {exc}")
+                log_error("unknown", f, f"Exception: {exc}")
+
+    if failed_ids:
+        print(f"Failed Document IDs in {directory}: {', '.join(failed_ids)}")
 
 if __name__ == "__main__":
+    print(f"Starting parallel processing with {MAX_WORKERS} workers...")
     for d in TARGET_DIRS:
         process_directory(d)
