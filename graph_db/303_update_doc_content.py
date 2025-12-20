@@ -29,7 +29,7 @@ def update_documents_with_content():
     updates = []
     for d in docs:
         idx = d['index']
-        md_path = f"attachments/{idx}_parsed.md"
+        md_path = f"../docs/attachments/{idx}_parsed.md"
         
         content = ""
         if os.path.exists(md_path):

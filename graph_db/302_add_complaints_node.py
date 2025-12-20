@@ -14,7 +14,7 @@ NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "testpassword")
 def add_complaints():
     print("--- 1. Loading Data ---")
     try:
-        df = pd.read_csv("seoul_youth_allowance_complaints_updated.csv")
+        df = pd.read_csv("../data/seoul_youth_allowance_complaints_updated.csv")
         print(f" > Found {len(df)} complaints.")
     except Exception as e:
         print(f"Error loading CSV: {e}")
@@ -41,7 +41,7 @@ def add_complaints():
         date = str(row['Date']).strip() if pd.notna(row['Date']) else ""
         
         # Read content from MD file
-        md_path = f"attachments_complaints/{idx}_parsed.md"
+        md_path = f"../docs/attachments_complaints/{idx}_parsed.md"
         content = ""
         if os.path.exists(md_path):
             with open(md_path, "r", encoding="utf-8") as f:
