@@ -1,5 +1,7 @@
 # 서울시 청년정책 공문서-민원 통합 GraphRAG 시스템
 
+> 발표자료: [https://docs.google.com/presentation/d/14w9O2muEAtX1wCSyr8blcgLKZR_diBEYmZjQwv0opMI/edit?usp=sharing](https://docs.google.com/presentation/d/14w9O2muEAtX1wCSyr8blcgLKZR_diBEYmZjQwv0opMI/edit?usp=sharing)
+
 이 프로젝트는 **서울시 청년수당 공문서**와 **민원 답변 데이터**를 결합하여, 민원 사례로부터 정책적 근거(공문서)와 담당자를 추적할 수 있는 **고도화된 Graph Retrieval-Augmented Generation (GraphRAG)** 시스템입니다.
 
 단순히 텍스트만 찾는 기존 RAG의 한계를 넘어, **벡터 유사도**와 **지식 그래프의 관계망**을 동시에 활용하여 질문에 대한 정확한 출처와 근거를 제시합니다.
@@ -41,6 +43,17 @@ sinoic-hackerton/
 ---
 
 ## 🚀 설치 및 실행 방법
+
+### ⚡ 빠른 실행 (통합 스크립트)
+환경 설정, 데이터 구축, 서버 실행까지 한 번에 완료하려면 다음 명령어를 실행하세요:
+```bash
+./setup_and_run.sh
+```
+*(최초 실행 시 `.env` 파일이 생성되며, `OPENAI_API_KEY`를 입력한 후 다시 실행하시면 됩니다.)*
+
+---
+
+### 🛠️ 수동 실행 (상세 단계)
 
 ### 0. Neo4j 데이터베이스 실행 (Docker)
 Neo4j가 설치되어 있지 않다면 도커를 사용하여 간편하게 실행할 수 있습니다.
