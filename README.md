@@ -42,8 +42,23 @@ sinoic-hackerton/
 
 ## 🚀 설치 및 실행 방법
 
+### 0. Neo4j 데이터베이스 실행 (Docker)
+Neo4j가 설치되어 있지 않다면 도커를 사용하여 간편하게 실행할 수 있습니다.
+```bash
+docker run \
+    --name neo4j-hackerton \
+    -p 7474:7474 -p 7687:7687 \
+    -d \
+    -e NEO4J_AUTH=neo4j/testpassword \
+    -e NEO4J_PLUGINS='["apoc"]' \
+    neo4j:5.26.0
+```
+*   **ID**: `neo4j` / **PW**: `testpassword`
+*   브라우저 접속: `http://localhost:7474`
+*   데이터 접속: `bolt://localhost:7687`
+
 ### 1. 환경 설정
-*   **필수 요구사항**: Python 3.12+, Neo4j DB (Docker 추천), OpenAI API Key.
+*   **필수 요구사항**: Python 3.12+, Neo4j DB, OpenAI API Key.
 *   **의존성 설치** (프로젝트 루트에서 실행):
     ```bash
     uv sync
@@ -63,10 +78,10 @@ sinoic-hackerton/
 uv run graph_db/301_build_real_graph.py
 
 # 2. 공문서 본문(MD 파일) 업데이트 및 벡터 인덱스 생성
-uv run graph_db/303_update_doc_content.py
+uv run graph_db/302_update_doc_content.py
 
 # 3. 민원 데이터 추가 및 공문서-민원 유사도 연결 (Top 5)
-uv run graph_db/302_add_complaints_node.py
+uv run graph_db/303_add_complaints_node.py
 ```
 
 ### 3. API 서버 및 웹 UI 실행
@@ -105,3 +120,20 @@ CSV 데이터 로드 시 포함될 수 있는 `\r` 등의 숨은 공백으로 �
 
 ---
 **Sinoic Tech Hackathon - GraphRAG Team**
+
+---
+
+## 💡 부록: 기타 스크립트 (Maintenance & Study)
+
+`graph_db/` 디렉토리 내의 숫자 번호가 붙은 파일들은 시스템 개발 및 테스트를 위한 보조 스크립트입니다.
+
+*   **100번대 (Study & Basic)**:
+    *   `101_neo4j_study.py`: Neo4j 연결 및 기본적인 Cypher 쿼리 실행 학습용.
+    *   `102_neo4j_llm_qa.py`: LangChain을 이용한 기초적인 GraphQA 연동 테스트.
+*   **200번대 (Prototyping)**:
+    *   `201_neo4j_seed_data.py`: 더미 데이터를 활용한 초기 그래프 스키마 설계용.
+    *   `202_neo4j_hybrid_rag.py`: 벡터 검색과 그래프 검색을 결합한 하이브리드 RAG 로직 실험용.
+*   **400번대 (Performance & Test)**:
+    *   `401_complex_query_test.py`: 민원-문서-담당자로 이어지는 다중 홉(Multi-hop) 경로 추적 성능 검증.
+    *   `test_api.py`: `api_server_real.py`의 엔드포인트가 정상적으로 응답하는지 확인하는 테스트 도구.
+

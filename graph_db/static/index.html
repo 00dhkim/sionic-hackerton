@@ -44,6 +44,22 @@
     }
     section.card h2 { margin: 0 0 8px; font-size: 18px; }
     .flex { display: flex; gap: 12px; flex-wrap: wrap; }
+    .examples { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .example-btn {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--muted);
+      padding: 6px 12px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .example-btn:hover {
+      background: rgba(56, 189, 248, 0.1);
+      color: var(--accent);
+      border-color: var(--accent);
+    }
     .input {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -158,6 +174,13 @@
       <form id="queryForm">
         <div class="flex">
           <textarea id="queryInput" class="input" placeholder="예) 지급이 중단된 민원과 관련 근거 문서를 알려줘" required></textarea>
+        </div>
+        <div class="examples">
+          <button type="button" class="example-btn">청년수당 사업에서 어떤 민원이 많이 나오는지 알려줘</button>
+          <button type="button" class="example-btn">어느 문서와 관련된 민원이 많은지 알려줘</button>
+          <button type="button" class="example-btn">내년 청년수당 관련 공고가 언제 나올지 알려줘</button>
+          <button type="button" class="example-btn">자기성장기록서 작성을 깜빡했는데 청년수당 지급받을 수 있어?</button>
+          <button type="button" class="example-btn">청년수당 미선정과 관련된 이의신청 사례와 대처법 알려줘</button>
         </div>
         <div class="flex" style="justify-content: space-between; align-items: center; margin-top: 8px;">
           <div class="small" id="statusText">API 서버와 그래프에 연결 중...</div>
@@ -483,6 +506,15 @@
     }
 
     queryForm.addEventListener('submit', handleSearch);
+
+    // Handle example buttons
+    document.querySelectorAll('.example-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        queryInput.value = btn.textContent;
+        handleSearch(new Event('submit'));
+      });
+    });
+
     fetchGraph();
   </script>
 </body>

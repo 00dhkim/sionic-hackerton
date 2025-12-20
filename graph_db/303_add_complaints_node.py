@@ -81,13 +81,12 @@ def add_complaints():
     print("\n--- 4. Linking Complaints to Documents (Similarity Search) ---")
     
     # Using the correct index name: 'document_embedding_index'
-    # Changed from 1 to 5
     query_link = """
     MATCH (c:Complaint)
     WHERE c.embedding IS NOT NULL
-    CALL db.index.vector.queryNodes('document_embedding_index', 5, c.embedding) 
+    CALL db.index.vector.queryNodes('document_embedding_index', 1, c.embedding) 
     YIELD node AS sim_doc, score
-    WHERE score > 0.5 
+    WHERE score > 0.7 
     MERGE (c)-[r:RELATED_TO]->(sim_doc)
     SET r.score = score
     RETURN count(r) as links_created
@@ -108,7 +107,7 @@ def add_complaints():
             print(f" [LINK] {s['Complaint'][:30]}... \n        -> {s['Document'][:30]}... (Score: {s['Score']:.4f})")
     except Exception as e:
         print(f"Error linking nodes: {e}")
-        print("Hint: Check if 'real_doc_index' exists and tracks embeddings.")
+        print("Hint: Check if 'document_embedding_index' exists and tracks embeddings.")
 
     print("\n--- Done ---")
 

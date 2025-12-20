@@ -54,7 +54,7 @@ def update_documents_with_content():
     
     # First, drop existing index
     try:
-        graph.query("DROP INDEX real_doc_index")
+        graph.query("DROP INDEX document_embedding_index")
         print(" > Dropped old index.")
     except:
         pass
@@ -66,7 +66,7 @@ def update_documents_with_content():
         url=NEO4J_URI,
         username=NEO4J_USER,
         password=NEO4J_PASSWORD,
-        index_name="real_doc_index",
+        index_name="document_embedding_index",
         node_label="Document",
         text_node_properties=["content"],  # <--- HERE: Indexing Full Content!
         embedding_node_property="embedding",
