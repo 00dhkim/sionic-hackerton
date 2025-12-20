@@ -1,0 +1,15 @@
+INFO:     Started server process [97633]
+INFO:     Waiting for application startup.
+--- Starting Advanced GraphRAG Server ---
+ > Connecting to Neo4j...
+ > Loading Document Vector Index...
+   - Document Index Ready.
+ > Loading Complaint Vector Index...
+   - Complaint Index Ready.
+ > [SUCCESS] All Vectors & Graph Ready.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8080 (Press CTRL+C to quit)
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [97633]
