@@ -77,21 +77,52 @@ def get_trace_context(node_id: Union[int, str], label: str) -> str:
 async def lifespan(app: FastAPI):
     print("--- Starting Advanced GraphRAG Server ---")
     try:
+        print(" > Connecting to Neo4j...")
         state.graph = Neo4jGraph(url=NEO4J_URI, username=NEO4J_USER, password=NEO4J_PASSWORD, refresh_schema=False)
         
-        # Initialize Vectors
         embeddings = OpenAIEmbeddings()
-        state.doc_vector = Neo4jVector.from_existing_graph(
-            embeddings, url=NEO4J_URI, username=NEO4J_USER, password=NEO4J_PASSWORD,
-            index_name="document_embedding_index", node_label="Document", text_node_properties=["content"]
-        )
-        state.complaint_vector = Neo4jVector.from_existing_graph(
-            embeddings, url=NEO4J_URI, username=NEO4J_USER, password=NEO4J_PASSWORD,
-            index_name="complaint_index", node_label="Complaint", text_node_properties=["content"]
-        )
-        print(" > Vectors & Graph Ready.")
+        
+        # Initialize Document Vector
+        print(" > Loading Document Vector Index...")
+        try:
+            state.doc_vector = Neo4jVector.from_existing_graph(
+                embeddings, 
+                url=NEO4J_URI, 
+                username=NEO4J_USER, 
+                password=NEO4J_PASSWORD,
+                index_name="document_embedding_index", 
+                node_label="Document", 
+                text_node_properties=["content"],
+                embedding_node_property="embedding"  # Added
+            )
+            print("   - Document Index Ready.")
+        except Exception as e:
+            print(f"   - FAILED to load Document Index: {e}")
+
+        # Initialize Complaint Vector
+        print(" > Loading Complaint Vector Index...")
+        try:
+            state.complaint_vector = Neo4jVector.from_existing_graph(
+                embeddings, 
+                url=NEO4J_URI, 
+                username=NEO4J_USER, 
+                password=NEO4J_PASSWORD,
+                index_name="complaint_index", 
+                node_label="Complaint", 
+                text_node_properties=["content"],
+                embedding_node_property="embedding"  # Added
+            )
+            print("   - Complaint Index Ready.")
+        except Exception as e:
+            print(f"   - FAILED to load Complaint Index: {e}")
+
+        if state.doc_vector and state.complaint_vector:
+            print(" > [SUCCESS] All Vectors & Graph Ready.")
+        else:
+            print(" > [WARNING] Some indexes failed to load. Search might be unavailable.")
+
     except Exception as e:
-        print(f"Init Error: {e}")
+        print(f"CRITICAL Init Error: {e}")
     yield
 
 app = FastAPI(title="Seoul Youth Policy Advanced RAG", lifespan=lifespan)
@@ -101,9 +132,19 @@ class SearchRequest(BaseModel):
 
 @app.post("/api/search")
 async def search(request: SearchRequest):
+    # Sanity check: Ensure vectors are initialized
+    if not state.complaint_vector or not state.doc_vector:
+        raise HTTPException(
+            status_code=503, 
+            detail="Search service is still initializing or failed to load vector indexes. Please check server logs."
+        )
+
     # 1. Search both indexes
-    c_docs = state.complaint_vector.similarity_search(request.query, k=2)
-    d_docs = state.doc_vector.similarity_search(request.query, k=2)
+    try:
+        c_docs = state.complaint_vector.similarity_search(request.query, k=2)
+        d_docs = state.doc_vector.similarity_search(request.query, k=2)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Vector search failed: {e}")
     
     combined_context = ""
     sources = []
