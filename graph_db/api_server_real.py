@@ -1,11 +1,14 @@
 import os
 import contextlib
-from typing import List, Optional, Union
+from pathlib import Path
+from typing import Dict, List, Optional, Set, Union
 from dotenv import load_dotenv
 
-load_dotenv() 
+load_dotenv()
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from langchain_neo4j import Neo4jGraph, Neo4jVector
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
@@ -24,53 +27,105 @@ class AppState:
     complaint_vector: Optional[Neo4jVector] = None
 
 state = AppState()
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
 
 # --- Graph Logic ---
-def get_trace_context(node_id: Union[int, str], label: str) -> str:
+def get_complaint_context(node_id: Union[int, str]) -> Dict:
     """
-    Traverse the graph based on the starting node type.
+    Traverse Complaint -> Related Docs -> Authors for UI context and graph highlighting.
     """
-    if not state.graph: return ""
-    
-    if label == "Complaint":
-        # Complaint -> Related Docs -> Authors
-        query = """
-        MATCH (c:Complaint {index: $id})
-        OPTIONAL MATCH (c)-[r:RELATED_TO]->(d:Document)
-        OPTIONAL MATCH (d)<-[:AUTHORED]-(p:Person)
-        RETURN 
-            d.title as doc_title,
-            d.doc_id as doc_id,
-            p.name as author_name,
-            r.score as sim_score
-        ORDER BY sim_score DESC LIMIT 5
-        """
-        result = state.graph.query(query, params={"id": node_id})
-        context = "  [Related Public Documents & Authors]\n"
-        for row in result:
-            if row['doc_title']:
-                context += f"  - {row['doc_title']} (ID: {row['doc_id']}) / 담당자: {row['author_name']}\n"
-        return context
+    if not state.graph:
+        return {"context_text": "", "neo4j_id": None, "related_documents": []}
 
-    elif label == "Document":
-        # Document -> Author -> Other Docs & Citations
-        query = """
-        MATCH (d:Document {doc_id: $id})
-        OPTIONAL MATCH (d)<-[:AUTHORED]-(p:Person)-[:BELONGS_TO]->(dep:Department)
-        OPTIONAL MATCH (d)-[:CITES]->(cited:Document)
-        RETURN 
-            p.name as author, dep.name as dept,
-            collect(DISTINCT cited.title) as citations
-        """
-        result = state.graph.query(query, params={"id": node_id})
-        if not result: return ""
-        row = result[0]
-        context = f"  [Metadata]\n  - Author: {row['author']} ({row['dept']})\n"
-        if row['citations']:
-            context += f"  - Citations: {', '.join(row['citations'][:3])}\n"
-        return context
-    
-    return ""
+    query = """
+    MATCH (c:Complaint {index: $id})
+    OPTIONAL MATCH (c)-[r:RELATED_TO]->(d:Document)
+    OPTIONAL MATCH (d)<-[:AUTHORED]-(p:Person)
+    RETURN 
+        id(c) as complaint_node_id,
+        d.title as doc_title,
+        d.doc_id as doc_id,
+        id(d) as doc_node_id,
+        p.name as author_name,
+        id(p) as author_node_id,
+        r.score as sim_score
+    ORDER BY sim_score DESC LIMIT 5
+    """
+    result = state.graph.query(query, params={"id": node_id})
+    context_lines = ["  [Related Public Documents & Authors]"]
+    related_docs = []
+
+    complaint_node_id = None
+    for row in result:
+        if complaint_node_id is None:
+            complaint_node_id = row.get("complaint_node_id")
+        if row.get("doc_title"):
+            related_docs.append(
+                {
+                    "doc_id": row.get("doc_id"),
+                    "title": row.get("doc_title"),
+                    "neo4j_id": row.get("doc_node_id"),
+                    "author": row.get("author_name"),
+                    "author_node_id": row.get("author_node_id"),
+                    "similarity": row.get("sim_score"),
+                }
+            )
+            context_lines.append(
+                f"  - {row.get('doc_title')} (ID: {row.get('doc_id')}) / 담당자: {row.get('author_name')}"
+            )
+
+    return {
+        "context_text": "\n".join(context_lines) if len(context_lines) > 1 else "",
+        "neo4j_id": complaint_node_id,
+        "related_documents": related_docs,
+    }
+
+
+def get_document_context(node_id: Union[int, str]) -> Dict:
+    """
+    Traverse Document -> Author/Department -> Citations for UI context and graph highlighting.
+    """
+    if not state.graph:
+        return {"context_text": "", "neo4j_id": None, "metadata": {}}
+
+    query = """
+    MATCH (d:Document {doc_id: $id})
+    OPTIONAL MATCH (d)<-[:AUTHORED]-(p:Person)-[:BELONGS_TO]->(dep:Department)
+    OPTIONAL MATCH (d)-[:CITES]->(cited:Document)
+    RETURN 
+        id(d) as doc_node_id,
+        p.name as author, id(p) as author_node_id,
+        dep.name as dept, id(dep) as dept_node_id,
+        collect(DISTINCT {title: cited.title, doc_id: cited.doc_id, neo4j_id: id(cited)}) as citations
+    """
+    result = state.graph.query(query, params={"id": node_id})
+    if not result:
+        return {"context_text": "", "neo4j_id": None, "metadata": {}}
+
+    row = result[0]
+    metadata = {
+        "author": row.get("author"),
+        "author_node_id": row.get("author_node_id"),
+        "department": row.get("dept"),
+        "department_node_id": row.get("dept_node_id"),
+        "citations": row.get("citations") or [],
+    }
+
+    context_lines = ["  [Metadata]"]
+    if metadata["author"]:
+        dept_text = f" ({metadata['department']})" if metadata["department"] else ""
+        context_lines.append(f"  - Author: {metadata['author']}{dept_text}")
+    if metadata["citations"]:
+        cited_titles = [c["title"] for c in metadata["citations"] if c.get("title")]
+        if cited_titles:
+            context_lines.append(f"  - Citations: {', '.join(cited_titles[:3])}")
+
+    return {
+        "context_text": "\n".join(context_lines) if len(context_lines) > 1 else "",
+        "neo4j_id": row.get("doc_node_id"),
+        "metadata": metadata,
+    }
 
 # --- Lifespan Manager ---
 @contextlib.asynccontextmanager
@@ -126,6 +181,18 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title="Seoul Youth Policy Advanced RAG", lifespan=lifespan)
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+@app.get("/", response_class=HTMLResponse)
+async def serve_index():
+    """
+    Serve the interactive Graph RAG frontend when available.
+    """
+    index_file = STATIC_DIR / "index.html"
+    if index_file.exists():
+        return FileResponse(index_file)
+    return HTMLResponse("<h1>Graph RAG API is running.</h1>")
 
 class SearchRequest(BaseModel):
     query: str
@@ -148,20 +215,61 @@ async def search(request: SearchRequest):
     
     combined_context = ""
     sources = []
+    contexts = {"complaints": [], "documents": []}
+    highlighted_nodes: Set[int] = set()
     
     # Process Complaints
     for doc in c_docs:
-        idx = doc.metadata['index']
-        graph_info = get_trace_context(idx, "Complaint")
-        combined_context += f"[Complaint]: {doc.page_content[:300]}\n{graph_info}\n---\n"
-        sources.append({"type": "Complaint", "title": doc.page_content[:50], "id": str(idx)})
+        idx = doc.metadata["index"]
+        context_data = get_complaint_context(idx)
+        complaint_snippet = doc.page_content[:300]
+        if context_data["neo4j_id"]:
+            highlighted_nodes.add(context_data["neo4j_id"])
+        for related in context_data["related_documents"]:
+            if related.get("neo4j_id"):
+                highlighted_nodes.add(related["neo4j_id"])
+            if related.get("author_node_id"):
+                highlighted_nodes.add(related["author_node_id"])
+
+        contexts["complaints"].append(
+            {
+                "id": idx,
+                "neo4j_id": context_data["neo4j_id"],
+                "snippet": complaint_snippet,
+                "related_documents": context_data["related_documents"],
+            }
+        )
+        combined_context += f"[Complaint]: {complaint_snippet}\n{context_data['context_text']}\n---\n"
+        sources.append({"type": "Complaint", "title": complaint_snippet, "id": str(idx)})
         
     # Process Documents
     for doc in d_docs:
-        doc_id = doc.metadata['doc_id']
-        graph_info = get_trace_context(doc_id, "Document")
-        combined_context += f"[Document]: {doc.metadata['title']}\nContent: {doc.page_content[:300]}\n{graph_info}\n---\n"
-        sources.append({"type": "Document", "title": doc.metadata['title'], "id": doc_id})
+        doc_id = doc.metadata["doc_id"]
+        doc_title = doc.metadata["title"]
+        context_data = get_document_context(doc_id)
+        doc_snippet = doc.page_content[:300]
+
+        if context_data["neo4j_id"]:
+            highlighted_nodes.add(context_data["neo4j_id"])
+        meta = context_data["metadata"]
+        for node_key in ("author_node_id", "department_node_id"):
+            if meta.get(node_key):
+                highlighted_nodes.add(meta[node_key])
+        for citation in meta.get("citations", []):
+            if citation.get("neo4j_id"):
+                highlighted_nodes.add(citation["neo4j_id"])
+
+        contexts["documents"].append(
+            {
+                "id": doc_id,
+                "neo4j_id": context_data["neo4j_id"],
+                "title": doc_title,
+                "snippet": doc_snippet,
+                "metadata": meta,
+            }
+        )
+        combined_context += f"[Document]: {doc_title}\nContent: {doc_snippet}\n{context_data['context_text']}\n---\n"
+        sources.append({"type": "Document", "title": doc_title, "id": doc_id})
 
     # 2. Generate Answer
     template = """
@@ -177,7 +285,63 @@ async def search(request: SearchRequest):
     llm = ChatOpenAI(model="gpt-4o")
     answer = (prompt | llm | StrOutputParser()).invoke({"context": combined_context, "question": request.query})
     
-    return {"answer": answer, "sources": sources}
+    return {
+        "answer": answer,
+        "sources": sources,
+        "context": contexts,
+        "highlighted_nodes": list(highlighted_nodes),
+    }
+
+@app.get("/api/graph/overview")
+async def graph_overview(limit: int = 300):
+    """
+    Fetch a simplified snapshot of the knowledge graph for UI visualization.
+    """
+    if not state.graph:
+        raise HTTPException(status_code=503, detail="Graph connection not initialized.")
+
+    nodes = state.graph.query(
+        """
+        MATCH (n)
+        WHERE any(label IN labels(n) WHERE label IN ['Document', 'Complaint', 'Person', 'Department'])
+        RETURN id(n) as id, labels(n) as labels, n.doc_id as doc_id, n.index as complaint_index,
+               n.title as title, n.name as name
+        LIMIT $limit
+        """,
+        params={"limit": limit},
+    )
+    node_ids = [row["id"] for row in nodes]
+
+    edges: List[Dict] = []
+    if node_ids:
+        edges = state.graph.query(
+            """
+            MATCH (n)-[r]->(m)
+            WHERE id(n) IN $ids AND id(m) IN $ids
+            RETURN id(n) as source, id(m) as target, type(r) as type
+            LIMIT 400
+            """,
+            params={"ids": node_ids},
+        )
+
+    node_payload = []
+    for row in nodes:
+        label = row["labels"][0] if row.get("labels") else "Node"
+        display_name = row.get("title") or row.get("name") or row.get("doc_id") or row.get("complaint_index")
+        node_payload.append(
+            {
+                "id": row["id"],
+                "labels": row.get("labels", []),
+                "display": display_name,
+                "doc_id": row.get("doc_id"),
+                "complaint_index": row.get("complaint_index"),
+                "title": row.get("title"),
+                "name": row.get("name"),
+                "primary_label": label,
+            }
+        )
+
+    return {"nodes": node_payload, "edges": edges}
 
 @app.get("/health")
 def health(): return {"status": "ok"}
