@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>서울시 청년정책 GraphRAG 콘솔</title>
+  <link rel="stylesheet" href="/ui/styles.css" />
+  <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+</head>
+<body>
+  <header>
+    <div>
+      <p class="eyebrow">서울시 청년정책 GraphRAG</p>
+      <h1>공문서 · 민원 그래프 탐색 콘솔</h1>
+      <p class="subtitle">텍스트를 입력해 연관 민원과 공문서를 조회하고, 실제 그래프 상의 문맥과 참조 노드를 확인하세요.</p>
+    </div>
+    <div class="badge">API 연동</div>
+  </header>
+
+  <main>
+    <section class="panel query-panel">
+      <div class="panel-header">
+        <div>
+          <p class="eyebrow">쿼리</p>
+          <h2>질문 입력</h2>
+        </div>
+        <button id="searchBtn" class="primary">검색 실행</button>
+      </div>
+      <textarea id="queryInput" rows="3" placeholder="예) 서류 미비로 지급이 중단된 경우 해결책과 담당자는?"></textarea>
+      <p class="helper">GraphRAG API와 바로 연동되어 민원/공문서 검색 및 추적 결과를 반환합니다.</p>
+      <div id="status" class="status">준비됨</div>
+    </section>
+
+    <section class="panel results-panel">
+      <div class="panel-grid">
+        <div class="column">
+          <div class="panel-sub">
+            <div class="panel-header inline">
+              <h3>AI 답변</h3>
+              <span class="pill" id="sourceCount">-</span>
+            </div>
+            <div id="answer" class="answer">질문을 입력하면 답변이 표시됩니다.</div>
+          </div>
+
+          <div class="panel-sub">
+            <div class="panel-header inline">
+              <h3>컨텍스트</h3>
+              <span class="pill muted">LLM 입력</span>
+            </div>
+            <pre id="context" class="context"></pre>
+          </div>
+
+          <div class="panel-sub">
+            <div class="panel-header inline">
+              <h3>참조된 노드</h3>
+              <span class="pill muted">Complaints / Documents</span>
+            </div>
+            <div id="sources" class="sources">검색 후 참조 노드가 표시됩니다.</div>
+          </div>
+        </div>
+
+        <div class="column graph-column">
+          <div class="panel-sub full-height">
+            <div class="panel-header inline">
+              <h3>그래프 시각화</h3>
+              <span class="pill muted" id="graphMeta">-</span>
+            </div>
+            <div id="graph"></div>
+            <div class="legend">
+              <span class="legend-item doc">Document</span>
+              <span class="legend-item complaint">Complaint</span>
+              <span class="legend-item person">Person</span>
+              <span class="legend-item dept">Department</span>
+              <span class="legend-item highlighted">Highlighted</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/ui/app.js"></script>
+</body>
+</html>
