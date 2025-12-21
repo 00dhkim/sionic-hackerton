@@ -1,4 +1,4 @@
-# 공무원이라도 graph RAG 하고싶어
+# 공무원이지만 Graph RAG 하고싶어
 
 서울시 청년정책 공문서-민원 통합 GraphRAG 시스템
 
