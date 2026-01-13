@@ -8,6 +8,23 @@ NC='\033[0m' # No Color
 
 echo -e "${GREEN}🚀 서울시 청년정책 GraphRAG 통합 설정 및 실행 스크립트 시작${NC}"
 
+# Arg Parsing
+REUSE_GRAPH=false
+
+for arg in "$@"
+do
+    case $arg in
+        -r|--reuse-graph)
+        REUSE_GRAPH=true
+        shift
+        ;;
+    esac
+done
+
+if [ "$REUSE_GRAPH" = true ]; then
+    echo -e "${YELLOW}⏩ 기존 그래프 데이터 재사용 모드: 그래프 구축 단계를 건너뜁니다.${NC}"
+fi
+
 # 1. 필수 도구 확인
 echo -e "\n${YELLOW}[1/6] 필수 도구 확인 중...${NC}"
 if ! command -v uv &> /dev/null; then echo -e "${RED}❌ uv가 설치되어 있지 않습니다. (https://astral.sh/uv)${NC}"; exit 1; fi
@@ -60,20 +77,25 @@ until uv run python3 -c "import socket; s = socket.socket(); s.connect(('localho
         exit 1
     fi
 done
+sleep 10
 echo -e "\n✅ Neo4j 준비 완료."
 
 # 5. 의존성 설치 및 데이터 구축
 echo -e "\n${YELLOW}[5/6] 라이브러리 설치 및 지식 그래프 구축...${NC}"
 uv sync
 
-echo -e "\n${GREEN}🏗️  Step 1: 공문서 기초 데이터 구축 (301)${NC}"
-uv run graph_db/301_build_real_graph.py
+if [ "$REUSE_GRAPH" = false ]; then
+    echo -e "\n${GREEN}🏗️  Step 1: 공문서 기초 데이터 구축 (301)${NC}"
+    uv run graph_db/301_build_real_graph.py
 
-echo -e "\n${GREEN}🏗️  Step 2: 공문서 본문 임베딩 및 인덱스 생성 (302)${NC}"
-uv run graph_db/302_update_doc_content.py
+    echo -e "\n${GREEN}🏗️  Step 2: 공문서 본문 임베딩 및 인덱스 생성 (302)${NC}"
+    uv run graph_db/302_update_doc_content.py
 
-echo -e "\n${GREEN}🏗️  Step 3: 민원 데이터 추가 및 유사도 연결 (303)${NC}"
-uv run graph_db/303_add_complaints_node.py
+    echo -e "\n${GREEN}🏗️  Step 3: 민원 데이터 추가 및 유사도 연결 (303)${NC}"
+    uv run graph_db/303_add_complaints_node.py
+else
+    echo -e "\n${YELLOW}⏩ 그래프 구축 단계 건너뜀 (이미 구축된 데이터 사용)${NC}"
+fi
 
 # 6. 서버 실행
 echo -e "\n${YELLOW}[6/6] 모든 준비가 완료되었습니다. API 서버를 실행합니다!${NC}"
