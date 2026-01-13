@@ -113,7 +113,22 @@ uv run uvicorn graph_db.api_server_real:app --host 0.0.0.0 --port 8000 --reload
 
 ### 1. 검색 API (`POST /api/search`)
 *   사용자 질문에 대해 하이브리드 검색을 수행하고, 답변과 함께 관련 공문서/민원 노드 및 담당자 정보를 반환합니다.
-*   **Payload**: `{ "query": "서류 미비로 지급이 중단된 경우의 해결책은?" }`
+*   **Payload**:
+    ```json
+    { 
+      "query": "서류 미비로 지급이 중단된 경우의 해결책은?",
+      "use_hyde": false
+    }
+    ```
+*   **HyDE 지원**: `use_hyde`를 `true`로 설정하면 HyDE(Hypothetical Document Embeddings) 기법이 적용됩니다.
+*   **A/B 테스트**: `use_hyde: true`인 경우, 일반 검색 결과와 HyDE 검색 결과를 동시에 반환하여 비교할 수 있습니다.
+
+### 2. HyDE (Hypothetical Document Embeddings)
+*   **개요**: 사용자 질문으로부터 가상 답변 문서를 생성하고, 이를 활용하여 더 정확한 문서 검색을 수행하는 기법입니다.
+*   **장점**:
+    *   질문과 문서 간의 의미적 간극을 줄여 검색 정확도 향상
+    *   자연어 질문에 대한 더 나은 이해도 제공
+*   **구현**: `graph_db/hyde_utils.py`에서 가상 문서 생성 로직을 제공합니다.
 
 ### 2. 그래프 시각화 API (`GET /api/graph/overview`)
 *   UI에서 지식 그래프의 구조를 시각화할 수 있도록 노드와 관계 데이터를 반환합니다.

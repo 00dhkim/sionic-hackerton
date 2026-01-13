@@ -4,6 +4,7 @@ from langchain_neo4j import Neo4jGraph, Neo4jVector
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from hyde_utils import generate_hypothetical_document
 
 # 1. Configuration
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
@@ -83,12 +84,21 @@ def get_expanded_context(doc_title: str) -> str:
     return context_str
 
 # 5. Hybrid RAG Chain
-def hybrid_rag_chat(question: str):
+def hybrid_rag_chat(question: str, use_hyde: bool = True):
     print(f"\n[Question]: {question}")
     
     # Step A: Vector Search (Retrieval)
+    search_query = question
+    if use_hyde:
+        print(" > Generating hypothetical document (HyDE)...")
+        hypothetical_doc = generate_hypothetical_document(question)
+        search_query = hypothetical_doc
+        print(f"   Hypothetical: {hypothetical_doc[:100]}...")
+    else:
+        print(" > Using standard search (without HyDE)")
+    
     # Get top 2 most similar documents
-    search_results = vector_index.similarity_search(question, k=2)
+    search_results = vector_index.similarity_search(search_query, k=2)
     
     combined_context = ""
     
@@ -130,7 +140,18 @@ def hybrid_rag_chat(question: str):
 # 6. Run Examples
 if __name__ == "__main__":
     # Question 1: Requires finding a doc about 'infrastructure' and knowing who wrote it (Author)
-    hybrid_rag_chat("우리 인프라 전략이랑 보안 관련 내용은 누가 담당했어?")
+    print("\n" + "="*50)
+    print("TEST 1: With HyDE")
+    print("="*50)
+    hybrid_rag_chat("우리 인프라 전략이랑 보안 관련 내용은 누가 담당했어?", use_hyde=True)
+    
+    print("\n" + "="*50)
+    print("TEST 2: Without HyDE (Standard)")
+    print("="*50)
+    hybrid_rag_chat("우리 인프라 전략이랑 보안 관련 내용은 누가 담당했어?", use_hyde=False)
     
     # Question 2: Requires connecting 'Frank' (Intern) to what he is studying (from Document content)
-    hybrid_rag_chat("Frank는 인턴 기간 동안 뭘 공부할 예정이야?")
+    print("\n" + "="*50)
+    print("TEST 3: With HyDE")
+    print("="*50)
+    hybrid_rag_chat("Frank는 인턴 기간 동안 뭘 공부할 예정이야?", use_hyde=True)

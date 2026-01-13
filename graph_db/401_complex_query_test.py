@@ -4,6 +4,7 @@ from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from dotenv import load_dotenv
+from hyde_utils import generate_hypothetical_document
 
 load_dotenv()
 
@@ -12,7 +13,7 @@ NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USER = os.getenv("NEO4J_USERNAME", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "testpassword")
 
-def complex_rag_test(question: str):
+def complex_rag_test(question: str, use_hyde: bool = True):
     print(f"\n[질문]: {question}")
     
     # 1. Connect to Graph
@@ -42,8 +43,17 @@ def complex_rag_test(question: str):
         embedding_node_property="embedding",
     )
     
+    search_query = question
+    if use_hyde:
+        print(" > HyDE: 가상 문서 생성 중...")
+        hypothetical_doc = generate_hypothetical_document(question)
+        search_query = hypothetical_doc
+        print(f"   생성된 가상 문서: {hypothetical_doc[:100]}...")
+    else:
+        print(" > 일반 검색 (HyDE 미사용)")
+    
     print(" > 민원 데이터 검색 중...")
-    relevant_complaints = complaint_vector.similarity_search(question, k=1)
+    relevant_complaints = complaint_vector.similarity_search(search_query, k=1)
     
     if not relevant_complaints:
         print(" > 관련 민원을 찾지 못했습니다.")
@@ -115,4 +125,13 @@ def complex_rag_test(question: str):
 
 if __name__ == "__main__":
     test_q = "청년수당 서류 미비로 인해 지급이 중단되었다는 민원이 있었는데, 이와 관련된 공문서는 무엇이고 그 문서의 작성자는 누구인지 알려줘."
-    complex_rag_test(test_q)
+    
+    print("\n" + "="*60)
+    print("테스트 1: HyDE 적용")
+    print("="*60)
+    complex_rag_test(test_q, use_hyde=True)
+    
+    print("\n" + "="*60)
+    print("테스트 2: HyDE 미적용 (일반 검색)")
+    print("="*60)
+    complex_rag_test(test_q, use_hyde=False)

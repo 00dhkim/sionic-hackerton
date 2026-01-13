@@ -1,4 +1,5 @@
 import os
+import sys
 import contextlib
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Union
@@ -14,6 +15,10 @@ from langchain_neo4j import Neo4jGraph, Neo4jVector
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+
+BASE_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(BASE_DIR))
+from hyde_utils import generate_hypothetical_document
 
 # --- Configuration ---
 # Look for .env in the current directory OR one level up (project root)
@@ -35,7 +40,6 @@ class AppState:
     complaint_vector: Optional[Neo4jVector] = None
 
 state = AppState()
-BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
 # --- Graph Logic ---
@@ -204,20 +208,34 @@ async def serve_index():
 
 class SearchRequest(BaseModel):
     query: str
+    use_hyde: bool = False
 
 @app.post("/api/search")
 async def search(request: SearchRequest):
     # Sanity check: Ensure vectors are initialized
     if not state.complaint_vector or not state.doc_vector:
         raise HTTPException(
-            status_code=503, 
+            status_code=503,
             detail="Search service is still initializing or failed to load vector indexes. Please check server logs."
         )
 
+    # Determine search query based on HyDE setting
+    search_query = request.query
+    hypothetical_doc = None
+    
+    if request.use_hyde:
+        # Generate hypothetical document for HyDE
+        try:
+            hypothetical_doc = generate_hypothetical_document(request.query)
+            search_query = hypothetical_doc
+            print(f"[HyDE] Generated hypothetical document for query: {request.query[:50]}...")
+        except Exception as e:
+            print(f"[HyDE] Failed to generate hypothetical document: {e}. Using original query.")
+
     # 1. Search both indexes
     try:
-        c_docs = state.complaint_vector.similarity_search(request.query, k=2)
-        d_docs = state.doc_vector.similarity_search(request.query, k=2)
+        c_docs = state.complaint_vector.similarity_search(search_query, k=2)
+        d_docs = state.doc_vector.similarity_search(search_query, k=2)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Vector search failed: {e}")
     
@@ -293,12 +311,50 @@ async def search(request: SearchRequest):
     llm = ChatOpenAI(model="gpt-4o")
     answer = (prompt | llm | StrOutputParser()).invoke({"context": combined_context, "question": request.query})
     
-    return {
+    response_data = {
         "answer": answer,
         "sources": sources,
         "context": contexts,
         "highlighted_nodes": list(highlighted_nodes),
+        "search_method": "HyDE" if request.use_hyde else "Standard",
+        "hypothetical_document": hypothetical_doc if request.use_hyde else None,
     }
+
+    # A/B Test: If use_hyde is True, also run standard search for comparison
+    if request.use_hyde:
+        try:
+            # Run standard search
+            c_docs_std = state.complaint_vector.similarity_search(request.query, k=2)
+            d_docs_std = state.doc_vector.similarity_search(request.query, k=2)
+            
+            # Build standard search context and answer
+            std_combined_context = ""
+            std_sources = []
+            std_contexts = {"complaints": [], "documents": []}
+            
+            for doc in c_docs_std:
+                idx = doc.metadata["index"]
+                std_contexts["complaints"].append({"id": idx, "snippet": doc.page_content[:500]})
+                std_combined_context += f"[Complaint]: {doc.page_content[:500]}\n---\n"
+                std_sources.append({"type": "Complaint", "title": doc.page_content[:150], "id": str(idx)})
+            
+            for doc in d_docs_std:
+                doc_id = doc.metadata.get("doc_id")
+                doc_title = doc.metadata.get("title")
+                std_contexts["documents"].append({"id": doc_id, "title": doc_title, "snippet": doc.page_content[:500]})
+                std_combined_context += f"[Document]: {doc_title}\nContent: {doc.page_content[:500]}\n---\n"
+                std_sources.append({"type": "Document", "title": doc_title or doc.page_content[:150], "id": doc_id})
+            
+            # Generate standard answer
+            std_answer = (prompt | llm | StrOutputParser()).invoke({"context": std_combined_context, "question": request.query})
+            
+            response_data["standard_answer"] = std_answer
+            response_data["standard_search_sources"] = std_sources
+            response_data["standard_context"] = std_contexts
+        except Exception as e:
+            print(f"[A/B Test] Failed to run standard search for comparison: {e}")
+
+    return response_data
 
 @app.get("/api/graph/overview")
 async def graph_overview(limit: int = 300):

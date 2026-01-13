@@ -146,9 +146,17 @@
     .node-group.highlight .node-label {
       opacity: 1;
     }
-    .link-label {
-      display: none; /* Always hide relationship labels */
-    }
+     .link-label {
+       display: none; /* Always hide relationship labels */
+     }
+     
+     #abTestSection {
+       border-color: #38bdf8;
+     }
+     
+     #abTestSection h2 {
+       color: #38bdf8;
+     }
     /* Force show node labels only when the parent has show-all-labels class */
     #graph.show-all-labels .node-label {
       opacity: 1;
@@ -182,18 +190,57 @@
           <button type="button" class="example-btn">자기성장기록서 작성을 깜빡했는데 청년수당 지급받을 수 있어?</button>
           <button type="button" class="example-btn">청년수당 미선정과 관련된 이의신청 사례와 대처법 알려줘</button>
         </div>
-        <div class="flex" style="justify-content: space-between; align-items: center; margin-top: 8px;">
-          <div class="small" id="statusText">API 서버와 그래프에 연결 중...</div>
-          <div>
-            <button type="submit" class="button" id="searchButton">검색 및 그래프 업데이트</button>
-          </div>
-        </div>
-      </form>
-    </section>
+         <div class="flex" style="justify-content: space-between; align-items: center; margin-top: 8px;">
+           <div class="small" id="statusText">API 서버와 그래프에 연결 중...</div>
+           <div style="display: flex; gap: 12px; align-items: center;">
+             <label class="small" style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+               <input type="checkbox" id="useHyde"> HyDE 사용
+             </label>
+             <label class="small" style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+               <input type="checkbox" id="showABTest"> A/B 테스트 결과 표시
+             </label>
+             <button type="submit" class="button" id="searchButton">검색 및 그래프 업데이트</button>
+           </div>
+         </div>
+       </form>
+     </section>
 
     <section class="card">
       <h2>답변</h2>
       <div id="answerBox" class="answer">검색 후 답변이 여기에 표시됩니다.</div>
+      <div id="hypotheticalDocBox" style="display: none; margin-top: 12px; padding: 12px; background: rgba(56, 189, 248, 0.05); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 10px;">
+        <div class="small" style="color: var(--accent); margin-bottom: 6px;">🤖 HyDE 가상 문서 (Hypothetical Document)</div>
+        <div id="hypotheticalDocContent" class="muted" style="white-space: pre-wrap; font-size: 14px;"></div>
+      </div>
+    </section>
+
+    <section class="card" id="abTestSection" style="display: none;">
+      <h2>📊 HyDE A/B 테스트 결과</h2>
+      
+      <!-- 답변 비교 -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-bottom: 20px;">
+        <div>
+          <h3 style="color: #94a3b8; margin: 0 0 12px;">일반 검색 답변 (Standard)</h3>
+          <div id="standardAnswer" class="answer" style="min-height: 100px; max-height: 400px; overflow-y: auto;">데이터 없음</div>
+        </div>
+        <div>
+          <h3 style="color: #38bdf8; margin: 0 0 12px;">HyDE 검색 답변</h3>
+          <div id="hydeAnswer" class="answer" style="min-height: 100px; max-height: 400px; overflow-y: auto;">데이터 없음</div>
+        </div>
+      </div>
+      
+      <!-- 검색 결과 소스 비교 -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px;">
+        <div>
+          <h3 style="color: #94a3b8; margin: 0 0 12px;">일반 검색 소스 (Standard)</h3>
+          <div id="standardSources" class="muted">데이터 없음</div>
+        </div>
+        <div>
+          <h3 style="color: #38bdf8; margin: 0 0 12px;">HyDE 검색 소스</h3>
+          <div id="hydeSources" class="muted">데이터 없음</div>
+        </div>
+      </div>
+      <div id="abTestStats" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);"></div>
     </section>
 
     <section class="card">
@@ -241,9 +288,33 @@
     const graphInfo = document.getElementById('graphInfo');
     const graphSvg = d3.select('#graph');
     const toggleLabels = document.getElementById('toggleLabels');
+    const useHydeCheckbox = document.getElementById('useHyde');
+    const showABTestCheckbox = document.getElementById('showABTest');
+    const hypotheticalDocBox = document.getElementById('hypotheticalDocBox');
+    const hypotheticalDocContent = document.getElementById('hypotheticalDocContent');
+    const abTestSection = document.getElementById('abTestSection');
+    const standardAnswerDiv = document.getElementById('standardAnswer');
+    const hydeAnswerDiv = document.getElementById('hydeAnswer');
+    const standardSourcesDiv = document.getElementById('standardSources');
+    const hydeSourcesDiv = document.getElementById('hydeSources');
+    const abTestStatsDiv = document.getElementById('abTestStats');
 
     toggleLabels.addEventListener('change', (e) => {
       graphSvg.classed('show-all-labels', e.target.checked);
+    });
+    
+    // When A/B test checkbox is checked, also check HyDE
+    showABTestCheckbox.addEventListener('change', (e) => {
+      if (e.target.checked) {
+        useHydeCheckbox.checked = true;
+      }
+    });
+    
+    // When HyDE checkbox is unchecked, also uncheck A/B test
+    useHydeCheckbox.addEventListener('change', (e) => {
+      if (!e.target.checked) {
+        showABTestCheckbox.checked = false;
+      }
     });
 
     const colors = {
@@ -484,18 +555,38 @@
       statusText.textContent = '검색 및 추론 중...';
       answerBox.textContent = '답변을 생성하고 있습니다...';
 
+      // Hide hypothetical doc and AB test section initially
+      hypotheticalDocBox.style.display = 'none';
+      abTestSection.style.display = 'none';
+
+      const useHyde = useHydeCheckbox.checked;
+      const showABTest = showABTestCheckbox.checked;
+
       try {
         const res = await fetch('/api/search', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query })
+          body: JSON.stringify({ query, use_hyde: useHyde })
         });
         if (!res.ok) throw new Error(await res.text());
         const data = await res.json();
+        
         answerBox.textContent = data.answer || '답변이 비어 있습니다.';
         renderContext(data.context);
         highlightGraphNodes(data.highlighted_nodes || []);
-        statusText.textContent = '검색 완료';
+        
+        // Show hypothetical document if HyDE was used
+        if (data.hypothetical_document) {
+          hypotheticalDocContent.textContent = data.hypothetical_document;
+          hypotheticalDocBox.style.display = 'block';
+        }
+        
+        // Show A/B test results if enabled and data available
+        if (showABTest && data.standard_search_sources) {
+          renderABTestResults(data);
+        }
+        
+        statusText.textContent = `검색 완료 (${data.search_method || 'Standard'})`;
       } catch (err) {
         answerBox.innerHTML = `<span class="error">검색 실패: ${err.message}</span>`;
         statusText.textContent = '검색 실패';
@@ -503,6 +594,79 @@
       } finally {
         searchButton.disabled = false;
       }
+    }
+
+    function renderABTestResults(data) {
+      abTestSection.style.display = 'block';
+      
+      // Render Standard Answer
+      const standardAnswerDiv = document.getElementById('standardAnswer');
+      if (data.standard_answer) {
+        standardAnswerDiv.textContent = data.standard_answer;
+      } else {
+        standardAnswerDiv.innerHTML = '<div class="muted">답변 없음</div>';
+      }
+      
+      // Render HyDE Answer
+      const hydeAnswerDiv = document.getElementById('hydeAnswer');
+      if (data.answer) {
+        hydeAnswerDiv.textContent = data.answer;
+      } else {
+        hydeAnswerDiv.innerHTML = '<div class="muted">답변 없음</div>';
+      }
+      
+      // Render Standard Sources
+      if (data.standard_search_sources && data.standard_search_sources.length > 0) {
+        standardSourcesDiv.innerHTML = data.standard_search_sources.map(s => `
+          <div class="context-card" style="margin-bottom: 8px; padding: 10px;">
+            <div class="badge">${s.type}</div>
+            <div class="small" style="margin-top: 6px;">${s.title?.substring(0, 240) || 'N/A'}...</div>
+          </div>
+        `).join('');
+      } else {
+        standardSourcesDiv.innerHTML = '<div class="muted">결과 없음</div>';
+      }
+      
+      // Render HyDE Sources
+      if (data.sources && data.sources.length > 0) {
+        hydeSourcesDiv.innerHTML = data.sources.map(s => `
+          <div class="context-card" style="margin-bottom: 8px; padding: 10px;">
+            <div class="badge">${s.type}</div>
+            <div class="small" style="margin-top: 6px;">${s.title?.substring(0, 240) || 'N/A'}...</div>
+          </div>
+        `).join('');
+      } else {
+        hydeSourcesDiv.innerHTML = '<div class="muted">결과 없음</div>';
+      }
+      
+      // Render Statistics
+      const standardCount = data.standard_search_sources?.length || 0;
+      const hydeCount = data.sources?.length || 0;
+      const overlap = calculateOverlap(
+        data.standard_search_sources?.map(s => s.id) || [],
+        data.sources?.map(s => s.id) || []
+      );
+      
+      abTestStatsDiv.innerHTML = `
+        <div class="small">
+          <strong>📈 검색 결과 비교:</strong><br>
+          • 일반 검색: ${standardCount}개 문서<br>
+          • HyDE 검색: ${hydeCount}개 문서<br>
+          • 중복 문서: ${overlap}개<br>
+          • HyDE만 찾은 문서: ${hydeCount - overlap}개<br>
+          • 일반 검색만 찾은 문서: ${standardCount - overlap}개
+        </div>
+      `;
+    }
+
+    function calculateOverlap(arr1, arr2) {
+      const set1 = new Set(arr1);
+      const set2 = new Set(arr2);
+      let count = 0;
+      set1.forEach(item => {
+        if (set2.has(item)) count++;
+      });
+      return count;
     }
 
     queryForm.addEventListener('submit', handleSearch);
